@@ -17,7 +17,7 @@ This repository implements a reproducible workflow for computing built-environme
 
 This video explains the main flow.
 
-![ST-BESA Demo](img/ST-BESA-balanced.gif)
+![ST-BESA Demo](img/ST-BESA.gif)
 
 
 Contents / Repository layout
