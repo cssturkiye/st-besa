@@ -17,7 +17,7 @@ This repository implements a reproducible workflow for computing built-environme
 
 This video explains the main flow.
 
-<video src="https://csstr.org/content/ST-BESA.mp4" autoplay loop muted playsinline style="max-width:60%; height:auto;" controls>
+<video src="img/ST-BESA.mp4" autoplay loop muted playsinline style="max-width:60%; height:auto;" controls>
   Your browser does not support the video tag.
 </video>
 
