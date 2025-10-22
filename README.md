@@ -17,9 +17,7 @@ This repository implements a reproducible workflow for computing built-environme
 
 This video explains the main flow.
 
-<video src="img/ST-BESA.mp4" autoplay loop muted playsinline style="max-width:60%; height:auto;" controls>
-  Your browser does not support the video tag.
-</video>
+![ST-BESA Demo](img/ST-BESA-balanced.gif)
 
 
 Contents / Repository layout
