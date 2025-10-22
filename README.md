@@ -8,7 +8,7 @@ Purpose
 -------
 This project is designed for non‑programmer social scientists. It is part of CSS Türkiye and aligns with the Fast CSS Tool ecosystem, making advanced geospatial analysis accessible without coding. See the Fast CSS Tool project for related work: https://github.com/cssturkiye/fastcsstool
 
-This repository implements a reproducible workflow for computing built-environment indicators (building volume, building surface, population) and derived metrics (BVPC, BSPC, volume/surface ratio) for administrative units in Türkiye (province/district) using Google Earth Engine (GEE) and the JRC GHSL datasets. The project provides an interactive Jupyter notebook UI (`arge.ipynb`) driven by `stbesa_service.py` which: 
+This repository implements a reproducible workflow for computing built-environment indicators (building volume, building surface, population) and derived metrics (BVPC, BSPC, volume/surface ratio) for administrative units in Türkiye (province/district) using Google Earth Engine (GEE) and the JRC GHSL datasets. The project provides an interactive Jupyter notebook UI (`app.ipynb`) driven by `stbesa_service.py` which: 
 
 - Loads and validates administrative boundaries (districts / provinces)
 - Sends polygons to Earth Engine to extract raster-derived statistics
@@ -23,7 +23,7 @@ This video explains the main flow.
 Contents / Repository layout
 ---------------------------
 - `stbesa_service.py` — Core service: data loaders, Earth Engine wrappers, UI builder, plotting and export functions.
-- `arge.ipynb` — Notebook that instantiates the UI and runs the interactive analysis.
+- `app.ipynb` — Notebook that instantiates the UI and runs the interactive analysis.
 - `BOUNDRY_DATA.md` — Boundary dataset provenance and notes (HDX OCHA COD-AB 2025).
 - Other large binary resources (shapefile ZIPs) are expected to be downloaded on demand by the loader and are not committed to the repo.
 
