@@ -27,6 +27,23 @@ Contents / Repository layout
 - `BOUNDRY_DATA.md` — Boundary dataset provenance and notes (HDX OCHA COD-AB 2025).
 - Other large binary resources (shapefile ZIPs) are expected to be downloaded on demand by the loader and are not committed to the repo.
 
+High-quality exports (600 DPI, 174 mm width)
+-------------------------------------------
+- Keep the "Fast (not recommended)" toggle OFF (Folium backend).
+- Click "Save Layers" after running an analysis.
+- The exporter writes separate files so you can stack them in layout tools:
+  - Transparent overlays: Building volume, Building surface, Population, SMOD L1, SMOD L2, Boundary
+    - Rendered by Earth Engine at native resolution (scale=100 m), then upscaled locally to 174 mm at 600 DPI using nearest-neighbor (sharp pixel edges, no smoothing)
+  - Base map split: `openstreetmap-bg` (no labels) and `openstreetmap-text` (labels only; adjustable size)
+- Files are written into a dedicated folder per export: `STBESA_EXPORT_<province>_<timestamp>/`.
+- Filenames: `ST-BESA_<province>_<layer>_<timestamp>.png`
+
+Time-series plot export (300 DPI, 174 mm width)
+-----------------------------------------------
+- Click "Export Plots" to save the two time-series figures (SMOD L1 and SMOD L2) exactly as shown in the UI.
+- Output width is fixed at 174 mm and 300 DPI; background is white.
+- Files are written into a dedicated folder per export: `STBESA_EXPORT_<province>_<timestamp>_PLOTS/`.
+
 Primary data sources
 --------------------
 1. Administrative boundaries (district/province):
@@ -106,7 +123,7 @@ Note: this is a conceptual overview of the code present in `stbesa_service.py` a
   - Purpose: construct the interactive Jupyter widgets (using `ipywidgets`) and outputs (`out_map`, `out_tbl`, `out_plot`) and bind handlers.
   - Important components and behavior:
     - Selection controls: province dropdown, district multi-select, year slider, scale controls (auto/manual), performance settings (Fast toggle which switches map backend between Folium and ipyleaflet). The district dropdown displays indices in the label for clarity (e.g. `Kadıköy (1)`).
-    - Action buttons: `Run Analysis` (runs on the selected year and region), `Export XLSX` (generates full multi-year SMOD breakdowns and writes an Excel file), `Apply scale` (applies manual color ranges), and a `Save image` button inside the map (folium backend) when the Fast option is off.
+    - Action buttons: `Run Analysis` (runs on the selected year and region), `Export XLSX` (generates full multi-year SMOD breakdowns and writes an Excel file), `Apply scale` (applies manual color ranges), and a `Capture Frame` button inside the map (folium backend) when the Fast option is off.
     - Busy state / UX: all long-running actions are wrapped with a `set_busy(True/False)` helper that disables interactive controls and displays a transient overlay with a spinner message. Status messages update progressively during multi-step operations and are scheduled to auto-dismiss after a short interval using `asyncio` to avoid background thread `ContextVar` issues.
     - Map rendering: uses `geemap` to produce either a Folium or ipyleaflet map depending on the Fast toggle. Map layer order is controlled to render (top-to-bottom): Boundary, Building volume, Building surface, Population, SMOD L1, SMOD L2.
     - Legends: continuous legends for volume/surface/population are injected as compact HTML colorbars into the folium root and positioned using absolute CSS (`right` and `bottom`). Categorical legends for SMOD L1 and L2 are injected as separate HTML blocks positioned at the bottom-left. The UI code exposes tuning values for these positions and has been iterated to avoid overlap with other map controls.

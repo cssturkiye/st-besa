@@ -180,6 +180,32 @@ SMOD_L2_CLASSES = {
 }
 
 
+# --------------------------- Export configuration (user-tunable) ---------------------------
+# Target printed width and DPI
+EXPORT_WIDTH_MM: float = 174.0
+EXPORT_DPI: int = 600
+
+# OSM labels apparent size boost (0 = default; 1-3 = larger text via higher tile zoom)
+OSM_LABELS_ZOOM_BOOST: int = 3
+
+# Legend typography (base pixel sizes; scaled dynamically if needed)
+LEGEND_TITLE_FONT_PX: int = 48
+LEGEND_TEXT_FONT_PX: int = 40
+
+# Which sections to render. Toggle to include/exclude outputs.
+EXPORT_SECTIONS = {
+    "openstreetmap_bg": True,
+    "smod_l2": True,
+    "smod_l1": True,
+    "population": True,
+    "surface": True,
+    "volume": True,
+    "boundary": True,
+    "openstreetmap_text": False,
+    "legends": True,
+    "photoshop_script": True,
+}
+
 # Optional EE helpers provided as a thin wrapper to keep notebook code cleaner
 class STBESAAnalysis:
     """
@@ -853,8 +879,13 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
     year_dd = _register_widget(W.Dropdown(options=years_all, value=year, layout=W.Layout(width='100px')))
 
     run_btn = _register_widget(W.Button(description='Run Analysis', button_style='primary', layout=W.Layout(margin='12px 0px', width='372px', height='32px')))
-    export_btn = _register_widget(W.Button(description='Export XLSX', button_style='success', layout=W.Layout(margin='0px', width='372px', height='28px')))
+    export_btn = _register_widget(W.Button(description='Export XLSX', button_style='success', layout=W.Layout(margin='0px 6px 0px 0px', width='116px', height='28px')))
     export_btn.disabled = True  # Disabled until data is loaded
+    export_plots_btn = _register_widget(W.Button(description='Export Plots', button_style='warning', layout=W.Layout(margin='0px 6px 0px 6px', width='116px', height='28px')))
+    export_plots_btn.disabled = True
+    # High-quality layer export (per-layer)
+    save_layers_btn = _register_widget(W.Button(description='Save Layers', button_style='info', layout=W.Layout(margin='0px 0px 0px 6px', width='116px', height='28px')))
+    save_layers_btn.disabled = True
     
     # Visualization controls
     auto_scale = _register_widget(W.Checkbox(value=True, description='Auto scale', indent=False))
@@ -1007,10 +1038,10 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
         dist_sel
     ], layout=W.Layout(align_items='flex-start', width='400px'))
     
-    # Run button and Export button row
+    # Run button and Export/Save buttons row
     run_export_row = W.VBox([
         W.HBox([run_btn], layout=W.Layout(justify_content='center', width='400px')),
-        W.HBox([export_btn], layout=W.Layout(justify_content='center', width='400px'))
+        W.HBox([export_btn, export_plots_btn, save_layers_btn], layout=W.Layout(justify_content='center', width='400px'))
     ], layout=W.Layout(gap='6px'))
     
     left_col = W.VBox([prov_year_row, dist_row, run_export_row], layout=W.Layout(gap='6px'))
@@ -1436,7 +1467,7 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
                         }
                         </script>
                         """
-                        button_html = '<div style="position:absolute; top:10px; right:70px; z-index:1000;"><button onclick="saveMapImage()" style="background:#fff;border:1px solid #333;padding:6px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Save Image</button></div>'
+                        button_html = '<div style="position:absolute; top:10px; right:70px; z-index:1000;"><button onclick="saveMapImage()" style="background:#fff;border:1px solid #333;padding:6px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Capture Frame</button></div>'
                         m.get_root().html.add_child(folium.Element(script_tag + save_js + button_html))
                     except Exception:
                         pass
@@ -1642,14 +1673,18 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
         _render_plots_l2(cur)
         ui_msg.value = "<b style='color:green'>✓ Analysis complete!</b>"
         
-        # Enable export button now that we have data (after set_busy is done)
-        # We need to update the saved state so set_busy(False) doesn't re-disable it
+        # Enable export buttons now that we have data (after set_busy is done)
+        # We need to update the saved state so set_busy(False) doesn't re-disable them
         _disabled_state[export_btn] = False
+        _disabled_state[export_plots_btn] = False
+        _disabled_state[save_layers_btn] = False
         
         set_busy(False)
         
-        # Ensure export button is enabled
+        # Ensure export buttons are enabled
         export_btn.disabled = False
+        export_plots_btn.disabled = False
+        save_layers_btn.disabled = False
         
         # Auto-clear success message after 5 seconds
         schedule_clear_message(5.0)
@@ -1792,6 +1827,501 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
             set_busy(False)
 
     export_btn.on_click(on_export_click)
+
+    def on_save_layers_click(_):
+        """Save separate transparent overlay PNGs (data only) and a separate OSM base.
+        - Data overlays are fetched from EE at native 100 m scale, then upscaled client-side
+          to 174 mm width at 600 DPI using nearest-neighbor (pixel edges preserved).
+        - OSM base is fetched at full target resolution as its own PNG to stack under overlays.
+        """
+        if cache["geom"] is None or not cache["vol"]:
+            ui_msg.value = "<b style='color:red'>No data to save. Please run analysis first.</b>"
+            return
+        import ee, math
+        analyzer = STBESAAnalysis(project_id)
+        analyzer.initialize_ee()
+        geom = cache["geom"]
+        cur = int(year_dd.value)
+        # Visualization parameters for current year
+        TURBO = ['#30123b','#4145ab','#2e7de0','#1db6d7','#27d39b','#7be151','#c0e620','#f9e14b','#fca72c','#f96814','#a31e1e']
+        vmin_vol, vmax_vol = cache["vis"]["vol"][cur]
+        vmin_sur, vmax_sur = cache["vis"]["sur"][cur]
+        vmin_pop, vmax_pop = cache["vis"]["pop"][cur]
+        vol = cache["vol"][cur]
+        sur = cache["sur"][cur]
+        pop = cache["pop"][cur]
+        smod = cache["smod"].get(cur)
+        # Build visualize images (mask zeros to keep background transparent)
+        vol_vis = vol.updateMask(vol.gt(0)).visualize(min=vmin_vol, max=vmax_vol, palette=TURBO)
+        sur_vis = sur.updateMask(sur.gt(0)).visualize(min=vmin_sur, max=vmax_sur, palette=TURBO)
+        pop_vis = pop.updateMask(pop.gt(0)).visualize(min=vmin_pop, max=vmax_pop, palette=TURBO)
+        layers = [(f"building_volume_{cur}", vol_vis), (f"building_surface_{cur}", sur_vis), (f"population_{cur}", pop_vis)]
+        if smod is not None:
+            smod_mask = smod.neq(0)
+            l2_palette_map = {10: '#7AB6F5', 11: '#CDF57A', 12: '#ABCD66', 13: '#375623', 21: '#FFFF00', 22: '#A87000', 23: '#732600', 30: '#FF0000'}
+            smod_l2_vis = smod.updateMask(smod_mask).remap([10,11,12,13,21,22,23,30],[0,1,2,3,4,5,6,7]).visualize(min=0, max=7, palette=list(l2_palette_map.values()))
+            smod_l1 = smod.divide(10).floor()
+            l1_palette = [SMOD_L1_CLASSES[1]["color"], SMOD_L1_CLASSES[2]["color"], SMOD_L1_CLASSES[3]["color"]]
+            smod_l1_vis = smod_l1.updateMask(smod_mask).visualize(min=1, max=3, palette=l1_palette)
+            layers.extend([(f"smod_l2_{cur}", smod_l2_vis), (f"smod_l1_{cur}", smod_l1_vis)])
+        outline = ee.Image().byte().paint(ee.FeatureCollection(cache["feat"]), 1, 2).visualize(min=0, max=1, palette=['000000'])
+        layers.append((f"boundary_{cur}", outline))
+        # File naming
+        import datetime
+        from pathlib import Path
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        prov = str(prov_dd.value).replace(' ', '_')
+        out_dir = Path.cwd() / f"STBESA_EXPORT_{prov}_{timestamp}"
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        set_busy(True, "Saving layers (native 100 m, 600 DPI, separate overlays/base)...")
+        ui_msg.value = "<b style='color:blue'>Rendering overlays at native 100 m; upscaling to 174 mm @ 600 DPI...</b>"
+        saved = []
+        # Target output width in pixels for 174 mm at 600 DPI
+        width_mm = 174.0
+        width_in = width_mm / 25.4
+        dpi = 600
+        out_width_px = int(round(width_in * dpi))
+        # Compute geographic bbox for export
+        try:
+            bbox = analyzer._ee_getinfo(ee.Geometry(geom).bounds().coordinates())
+            ring = bbox[0] if isinstance(bbox, list) and bbox else []
+            xs = [float(pt[0]) for pt in ring]
+            ys = [float(pt[1]) for pt in ring]
+            w = min(xs); e = max(xs); s = min(ys); n = max(ys)
+        except Exception:
+            try:
+                (s, w), (n, e) = last_bounds  # type: ignore
+            except Exception:
+                raise RuntimeError("Could not determine geometry bounds for export")
+
+        # Helper: approximate width of bbox in meters using Web Mercator (for OSM zoom)
+        def _approx_bbox_width_m(lon_w: float, lon_e: float, lat_mid: float) -> float:
+            radius = 6378137.0
+            dlon = math.radians(lon_e - lon_w)
+            return abs(radius * dlon * math.cos(math.radians(lat_mid)))
+
+        # Helper: fetch an XYZ tile layer covering bbox, matching output size (high-res)
+        def _fetch_xyz_layer(width_px: int, height_px: int, tile_url_tpl: str, zoom_boost: int = 0):
+            import urllib.request, io
+            from PIL import Image
+
+            def lonlat_to_pixel(lon: float, lat: float, z: int) -> tuple[float, float]:
+                lat_rad = math.radians(lat)
+                ntiles = 2 ** z
+                x = (lon + 180.0) / 360.0 * ntiles * 256.0
+                y = (1.0 - math.log(math.tan(lat_rad) + 1.0 / math.cos(lat_rad)) / math.pi) / 2.0 * ntiles * 256.0
+                return x, y
+
+            # Pick zoom based on desired meters-per-pixel
+            lat_c = (s + n) / 2.0
+            meters_per_pixel_target = max(0.1, _approx_bbox_width_m(w, e, lat_c) / max(1, width_px))
+            initial_res = 156543.03392804097
+            z_float = math.log2(max(1e-6, initial_res * math.cos(math.radians(lat_c)) / meters_per_pixel_target))
+            z = int(max(0, min(19, round(z_float) + int(zoom_boost))))
+
+            min_px_x, min_px_y = lonlat_to_pixel(w, n, z)
+            max_px_x, max_px_y = lonlat_to_pixel(e, s, z)
+            x0 = int(math.floor(min_px_x / 256.0))
+            y0 = int(math.floor(min_px_y / 256.0))
+            x1 = int(math.floor((max_px_x - 1) / 256.0))
+            y1 = int(math.floor((max_px_y - 1) / 256.0))
+            cols = x1 - x0 + 1
+            rows = y1 - y0 + 1
+            mosaic = Image.new('RGBA', (cols * 256, rows * 256), (0, 0, 0, 0))
+            opener = urllib.request.build_opener()
+            opener.addheaders = [('User-Agent', 'st-besa-export/1.0')]
+            urllib.request.install_opener(opener)
+            for ix in range(cols):
+                for iy in range(rows):
+                    tx = x0 + ix
+                    ty = y0 + iy
+                    url = tile_url_tpl.format(z=z, x=tx, y=ty)
+                    try:
+                        with urllib.request.urlopen(url) as resp:
+                            tile_data = resp.read()
+                        tile_img = Image.open(io.BytesIO(tile_data)).convert('RGBA')
+                        mosaic.paste(tile_img, (ix * 256, iy * 256))
+                    except Exception:
+                        pass
+            crop_left = int(round(min_px_x - x0 * 256.0))
+            crop_top = int(round(min_px_y - y0 * 256.0))
+            crop_right = crop_left + int(round(max_px_x - min_px_x))
+            crop_bottom = crop_top + int(round(max_px_y - min_px_y))
+            crop = mosaic.crop((crop_left, crop_top, crop_right, crop_bottom))
+            return crop.resize((width_px, height_px), resample=Image.BILINEAR)
+
+        import urllib.request, io
+        from PIL import Image
+        # Compute 3857 bounds and native pixel size at 100 m so all products share identical aspect ratio
+        try:
+            bounds_3857 = analyzer._ee_getinfo(ee.Geometry.Rectangle([w, s, e, n], proj='EPSG:4326', geodesic=False).transform('EPSG:3857', 1).coordinates())
+            ringm = bounds_3857[0]
+            xs_m = [float(pt[0]) for pt in ringm]
+            ys_m = [float(pt[1]) for pt in ringm]
+            wm = min(xs_m); em = max(xs_m); sm = min(ys_m); nm = max(ys_m)
+        except Exception:
+            raise RuntimeError("Failed to compute Web Mercator bounds for export")
+
+        width_m = max(1.0, em - wm)
+        height_m = max(1.0, nm - sm)
+        native_w_px = int(max(1, math.ceil(width_m / 100.0)))
+        native_h_px = int(max(1, math.ceil(height_m / 100.0)))
+
+        # Derive final output height preserving metric aspect ratio
+        target_height_px = int(max(1, round(out_width_px * (native_h_px / native_w_px))))
+
+        # 1) Save each data layer as a separate transparent overlay at native resolution (reproject to EPSG:3857)
+        overlays_written = []
+        order = [
+            ("02", "smod-l2", EXPORT_SECTIONS.get("smod_l2", True), next((img for name,img in layers if name.startswith("smod_l2_")), None)),
+            ("03", "smod-l1", EXPORT_SECTIONS.get("smod_l1", True), next((img for name,img in layers if name.startswith("smod_l1_")), None)),
+            ("04", "population", EXPORT_SECTIONS.get("population", True), next((img for name,img in layers if name.startswith("population_")), None)),
+            ("05", "surface", EXPORT_SECTIONS.get("surface", True), next((img for name,img in layers if name.startswith("building_surface_")), None)),
+            ("06", "volume", EXPORT_SECTIONS.get("volume", True), next((img for name,img in layers if name.startswith("building_volume_")), None)),
+            ("07", "boundary", EXPORT_SECTIONS.get("boundary", True), next((img for name,img in layers if name.startswith("boundary_")), None)),
+        ]
+        for prefix, short_name, enabled, limg in order:
+            if not enabled:
+                continue
+            if limg is None:
+                continue
+            img_merc = ee.Image(limg).reproject(crs='EPSG:3857', scale=100)
+            region_merc = ee.Geometry.Rectangle([wm, sm, em, nm], proj='EPSG:3857', geodesic=False)
+            # Request native pixel width to avoid EE heavy renders; height follows automatically
+            params = {"region": region_merc, "dimensions": native_w_px, "format": "png", "maxPixels": 1e13}
+            url = ee.Image(img_merc).getThumbURL(params)
+            fname = f"{prefix}_ST-BESA_{prov}_{short_name}_{timestamp}.png"
+            fpath = out_dir / fname
+            # Download native-resolution overlay
+            with urllib.request.urlopen(url) as resp:
+                data = resp.read()
+            overlay = Image.open(io.BytesIO(data)).convert('RGBA')
+            # Upscale to target 174 mm width at 600 DPI with NEAREST to preserve pixel edges
+            up_overlay = overlay.resize((out_width_px, target_height_px), resample=Image.NEAREST)
+            # Save transparent overlay with 600 DPI
+            try:
+                up_overlay.save(str(fpath), format='PNG', dpi=(dpi, dpi))
+            except Exception:
+                up_overlay.save(str(fpath), format='PNG')
+            saved.append(fpath)
+            overlays_written.append((short_name, target_height_px))
+
+        # 2) Save OSM base once at the same target size (matches last computed height)
+        try:
+            final_height = target_height_px
+            if EXPORT_SECTIONS.get("openstreetmap_bg", True):
+                nolabels_tpl = "https://basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png"
+                osm_bg = _fetch_xyz_layer(out_width_px, final_height, nolabels_tpl, zoom_boost=0).convert('RGB')
+                osm_bg_path = out_dir / f"01_ST-BESA_{prov}_openstreetmap-bg_{timestamp}.png"
+                try:
+                    osm_bg.save(str(osm_bg_path), format='PNG', dpi=(dpi, dpi))
+                except Exception:
+                    osm_bg.save(str(osm_bg_path), format='PNG')
+                saved.append(osm_bg_path)
+
+            if EXPORT_SECTIONS.get("openstreetmap_text", True):
+                labels_tpl   = "https://basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png"
+                osm_lbl = _fetch_xyz_layer(out_width_px, final_height, labels_tpl, zoom_boost=int(OSM_LABELS_ZOOM_BOOST)).convert('RGBA')
+                osm_lbl_path = out_dir / f"08_ST-BESA_{prov}_openstreetmap-text_{timestamp}.png"
+                try:
+                    osm_lbl.save(str(osm_lbl_path), format='PNG', dpi=(dpi, dpi))
+                except Exception:
+                    osm_lbl.save(str(osm_lbl_path), format='PNG')
+                saved.append(osm_lbl_path)
+        except Exception:
+            pass
+
+        # 3) Export legends and Photoshop script
+        if EXPORT_SECTIONS.get("legends", True):
+            try:
+                from PIL import Image, ImageDraw, ImageFont
+
+                def _load_font(size_px: int):
+                    try:
+                        return ImageFont.truetype("arial.ttf", size_px)
+                    except Exception:
+                        try:
+                            return ImageFont.truetype("DejaVuSans.ttf", size_px)
+                        except Exception:
+                            return ImageFont.load_default()
+
+                def save_continuous_legend(path, title, colors, vmin, vmax):
+                    # Fixed gradient box: 1000px x 60px
+                    bar_width = 1000
+                    bar_height = 60
+                    margin = 24
+                    title_font = _load_font(LEGEND_TITLE_FONT_PX)
+                    text_font = _load_font(LEGEND_TEXT_FONT_PX)
+                    title_height = title_font.size
+                    labels_height = text_font.size
+                    width = bar_width + margin * 2
+                    total_height = margin + title_height + 8 + bar_height + 6 + labels_height + margin
+                    img = Image.new('RGBA', (width, total_height), (0, 0, 0, 0))
+                    d = ImageDraw.Draw(img)
+                    # Title
+                    d.text((margin, margin), title, fill=(0,0,0,255), font=title_font)
+                    # Draw smooth turbo gradient across the fixed box
+                    try:
+                        from matplotlib import cm
+                        import numpy as np
+                        turbo_cmap = cm.get_cmap('turbo')
+                        for i in range(bar_width):
+                            t = i / max(1, bar_width - 1)
+                            rgba = turbo_cmap(t)
+                            color = tuple(int(c * 255) for c in rgba[:3])
+                            d.line([(margin + i, margin + title_height + 8), (margin + i, margin + title_height + 8 + bar_height)], fill=color)
+                    except Exception:
+                        # fallback to discrete colors if matplotlib is not available
+                        for i in range(bar_width):
+                            t = i / max(1, bar_width - 1)
+                            idx = int(t * (len(colors) - 1))
+                            d.line([(margin + i, margin + title_height + 8), (margin + i, margin + title_height + 8 + bar_height)], fill=colors[idx])
+                    # Min/max labels
+                    txt_min = f"{vmin:.1f}"
+                    txt_max = f"{vmax:.1f}"
+                    d.text((margin, margin + title_height + 8 + bar_height + 6), txt_min, fill=(0,0,0,255), font=text_font)
+                    try:
+                        tw = d.textlength(txt_max, font=text_font)
+                    except Exception:
+                        tw = len(txt_max) * text_font.size * 0.6
+                    d.text((margin + bar_width - int(tw), margin + title_height + 8 + bar_height + 6), txt_max, fill=(0,0,0,255), font=text_font)
+                    img.save(str(path), format='PNG', dpi=(dpi, dpi))
+
+                def save_categorical_legend(path, title, items):
+                    # Tighter layout: reduce gaps between title and classes and between color box and label
+                    width = int(out_width_px / 2.0)
+                    margin = 12
+                    title_font = _load_font(LEGEND_TITLE_FONT_PX)
+                    text_font = _load_font(LEGEND_TEXT_FONT_PX)
+                    row_h = max(24, int(text_font.size * 1.2))
+                    title_h = title_font.size
+                    box_size = max(18, int(text_font.size * 0.9))
+                    height = margin + title_h + 6 + len(items) * row_h + margin
+                    img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+                    d = ImageDraw.Draw(img)
+                    d.text((margin, margin), title, fill=(0,0,0,255), font=title_font)
+                    y = margin + title_h + 6
+                    for label, color in items:
+                        d.rectangle((margin, y, margin + box_size, y + box_size), fill=color, outline=(60,60,60,255))
+                        d.text((margin + box_size + 8, y), label, fill=(0,0,0,255), font=text_font)
+                        y += row_h
+                    img.save(str(path), format='PNG', dpi=(dpi, dpi))
+
+                save_continuous_legend(out_dir / f"09_ST-BESA_{prov}_legend_volume_{timestamp}.png", "Building volume (m³)", TURBO, vmin_vol, vmax_vol)
+                save_continuous_legend(out_dir / f"10_ST-BESA_{prov}_legend_surface_{timestamp}.png", "Building surface (m²)", TURBO, vmin_sur, vmax_sur)
+                save_continuous_legend(out_dir / f"11_ST-BESA_{prov}_legend_population_{timestamp}.png", "Population (people)", TURBO, vmin_pop, vmax_pop)
+
+                l1_items = [
+                    (SMOD_L1_CLASSES[1]['name'], SMOD_L1_CLASSES[1]['color']),
+                    (SMOD_L1_CLASSES[2]['name'], SMOD_L1_CLASSES[2]['color']),
+                    (SMOD_L1_CLASSES[3]['name'], SMOD_L1_CLASSES[3]['color']),
+                ]
+                save_categorical_legend(out_dir / f"12_ST-BESA_{prov}_legend_smod_l1_{timestamp}.png", "SMOD L1", l1_items)
+                l2_items = [
+                    ('10 Water/No data', '#7AB6F5'),
+                    ('11 Very low density rural', '#CDF57A'),
+                    ('12 Low density rural', '#ABCD66'),
+                    ('13 Rural cluster', '#375623'),
+                    ('21 Suburban/peri-urban', '#FFFF00'),
+                    ('22 Semi-dense urban', '#A87000'),
+                    ('23 Dense urban cluster', '#732600'),
+                    ('30 Urban centre', '#FF0000'),
+                ]
+                save_categorical_legend(out_dir / f"13_ST-BESA_{prov}_legend_smod_l2_{timestamp}.png", "SMOD L2", l2_items)
+            except Exception as e:
+                ui_msg.value = f"<b style='color:orange'>Warning: Legend generation failed: {str(e)}</b>"
+
+        if EXPORT_SECTIONS.get("photoshop_script", True):
+            try:
+                jsx = (
+                    "var folder = new Folder('" + str(out_dir).replace('\\', '/') + "');\n" +
+                    "var files = folder.getFiles(/\\.png$/i).sort(function(a,b){ return (decodeURI(a.name) > decodeURI(b.name)) ? 1 : -1; });\n" +
+                    "if(files.length>0){\n" +
+                    "  var base = app.open(files[0]);\n" +
+                    "  base.activeLayer.name = decodeURI(files[0].name.replace(/\\.png$/i,''));\n" +
+                    "  for(var i=1;i<files.length;i++){\n" +
+                    "    var im = app.open(files[i]); im.selection.selectAll(); im.selection.copy(); im.close(SaveOptions.DONOTSAVECHANGES); base.paste(); base.activeLayer.name = decodeURI(files[i].name.replace(/\\.png$/i,''));\n" +
+                    "  }\n" +
+                    "  base.resizeImage(undefined, undefined, " + str(dpi) + ", ResampleMethod.NONE);\n" +
+                    "}\n"
+                )
+                with open(out_dir / "load_layers.jsx", 'w', encoding='utf-8') as f:
+                    f.write(jsx)
+            except Exception as e:
+                ui_msg.value = f"<b style='color:orange'>Warning: Photoshop script creation failed: {str(e)}</b>"
+
+        # Report (folder only)
+        try:
+            msg = f"<b style='color:green'>✓ Saved {len(saved)} image(s) to folder:</b> {str(out_dir)}"
+            ui_msg.value = msg
+        except Exception:
+            ui_msg.value = "<b style='color:green'>✓ Saved images.</b>"
+        set_busy(False)
+
+    def on_export_plots_click(_):
+        """Export SMOD L1/L2 plots as 174 mm wide @ 300 DPI PNGs into a plots folder."""
+        if cache["geom"] is None or not cache["smod"]:
+            ui_msg.value = "<b style='color:red'>No SMOD data to export. Please run analysis first.</b>"
+            return
+        import ee, math
+        analyzer = STBESAAnalysis(project_id)
+        analyzer.initialize_ee()
+        geom = cache["geom"]
+        cur = int(year_dd.value)
+        smod = cache["smod"].get(cur)
+        if smod is None:
+            ui_msg.value = "<b style='color:red'>SMOD not available for the selected year.</b>"
+            return
+
+        # Build SMOD visualizations
+        smod_mask = smod.neq(0)
+        l2_palette_map = {10: '#7AB6F5', 11: '#CDF57A', 12: '#ABCD66', 13: '#375623', 21: '#FFFF00', 22: '#A87000', 23: '#732600', 30: '#FF0000'}
+        smod_l2_vis = smod.updateMask(smod_mask).remap([10,11,12,13,21,22,23,30],[0,1,2,3,4,5,6,7]).visualize(min=0, max=7, palette=list(l2_palette_map.values()))
+        smod_l1 = smod.divide(10).floor()
+        l1_palette = [SMOD_L1_CLASSES[1]["color"], SMOD_L1_CLASSES[2]["color"], SMOD_L1_CLASSES[3]["color"]]
+        smod_l1_vis = smod_l1.updateMask(smod_mask).visualize(min=1, max=3, palette=l1_palette)
+
+        # File naming
+        import datetime
+        from pathlib import Path
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        prov = str(prov_dd.value).replace(' ', '_')
+        out_dir = Path.cwd() / f"STBESA_EXPORT_{prov}_{timestamp}_PLOTS"
+        try:
+            out_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+        # Instead of exporting EE map images, export the exact matplotlib figures
+        set_busy(True, "Exporting SMOD time-series plots (174 mm, 300 DPI)...")
+        ui_msg.value = "<b style='color:blue'>Rendering SMOD L1/L2 time-series and saving to disk...</b>"
+        saved = []
+
+        # Target output width in inches for 174 mm and dpi
+        width_mm = 174.0
+        width_in = width_mm / 25.4
+        dpi = 300
+
+        try:
+            import matplotlib.pyplot as plt
+            import matplotlib as mpl
+            import numpy as np
+
+            # L1 figure (duplicate rendering logic from _render_plots_l1)
+            if cache.get("df_smod_l1") is not None and not cache["df_smod_l1"].empty:
+                total_df = cache["df"][ ["yil", "buvol_m3", "buvol_sur_m2", "pop_person", "bvpc_m3_per_person", "bspc_m2_per_person", "vol_sur_ratio"] ].sort_values("yil").reset_index(drop=True)
+                years = total_df["yil"].values
+                l1 = cache["df_smod_l1"][ ["yil", "smod_l1_code", "buvol_m3", "buvol_sur_m2", "pop_person", "bvpc_m3_per_person", "bspc_m2_per_person", "vol_sur_ratio"] ].copy()
+                piv = {metric: l1.pivot_table(index="yil", columns="smod_l1_code", values=metric, aggfunc="first").reindex(years).fillna(np.nan) for metric in ["buvol_m3","buvol_sur_m2","pop_person","bvpc_m3_per_person","bspc_m2_per_person","vol_sur_ratio"]}
+                mpl.rcParams.update({'figure.dpi': dpi,'savefig.dpi': dpi,'axes.titlesize': 7,'axes.labelsize': 6,'xtick.labelsize': 5,'ytick.labelsize': 5,'legend.fontsize': 5,'axes.grid': True,'grid.linestyle': ':','grid.alpha': 0.5,})
+                fig, axes = plt.subplots(3, 2, figsize=(width_in, width_in * 5.33/6.85), constrained_layout=False)
+                axes = axes.ravel()
+                fig.patch.set_alpha(1.0)
+                total_color = "#1f77b4"
+                l1_colors = {1: SMOD_L1_CLASSES[1]["color"], 2: SMOD_L1_CLASSES[2]["color"], 3: SMOD_L1_CLASSES[3]["color"]}
+                series = [("buvol_m3","Building Volume (m³)"),("buvol_sur_m2","Building Surface (m²)"),("pop_person","Population (people)"),("bvpc_m3_per_person","BVPC (m³/person)"),("bspc_m2_per_person","BSPC (m²/person)"),("vol_sur_ratio","Volume/Surface Ratio")]
+                for i,(key,label) in enumerate(series):
+                    ax = axes[i]
+                    ax.plot(years, total_df[key].values, color=total_color, linewidth=1.6, label="Total")
+                    ax.scatter(years, total_df[key].values, s=6, color=total_color, edgecolor=total_color, facecolor="white", zorder=3)
+                    for cls in [1,2,3]:
+                        if cls in piv[key].columns:
+                            ax.plot(years, piv[key][cls].values, color=l1_colors[cls], linewidth=1.0, label=str(cls))
+                    ax.set_title(label); ax.set_xlabel("Year"); ax.set_ylabel(label)
+                    ax.margins(x=0.02); ax.set_xticks(years); ax.tick_params(axis='x', rotation=0)
+                    try:
+                        ax.axvline(cur, color="#d62728", linestyle="--", linewidth=1.0, alpha=0.8)
+                    except Exception:
+                        pass
+                fig.suptitle("L1 Classes + Total", fontsize=7, fontweight='semibold')
+                fig.subplots_adjust(bottom=0.10, hspace=0.50)
+                from matplotlib.lines import Line2D
+                handles = [Line2D([0], [0], color=total_color, lw=3, label='Total')]
+                labels = ['Total']
+                for cls in [1, 2, 3]:
+                    handles.append(Line2D([0], [0], color=l1_colors[cls], lw=3))
+                    labels.append({1: 'Rural', 2: 'Urban Cluster', 3: 'Urban Centre'}[cls])
+                fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, -0.03), ncol=4, prop={'size':5}, handlelength=2, columnspacing=1.0, frameon=True, fancybox=True, shadow=True, edgecolor='black', facecolor='white', framealpha=0.9)
+                fpath = out_dir / f"ST-BESA_{prov}_plots_l1_{timestamp}.png"
+                # Save with tight bbox to preserve layout, then adjust width to 174mm
+                import io
+                buf = io.BytesIO()
+                fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight', transparent=False, facecolor='white')
+                plt.close(fig)
+                buf.seek(0)
+                from PIL import Image
+                im = Image.open(buf)
+                # Calculate target width for 174mm at 300 DPI
+                target_w = int(round(width_in * dpi))
+                # Resize width to exactly 174mm, keeping aspect ratio
+                new_h = int(round(im.size[1] * (target_w / im.size[0])))
+                im_resized = im.resize((target_w, new_h), resample=Image.BICUBIC)
+                im_resized.save(str(fpath), format='PNG', dpi=(dpi, dpi))
+                saved.append(fpath)
+
+            # L2 figure (duplicate rendering logic from _render_plots_l2)
+            if cache.get("df_smod_l2") is not None and not cache["df_smod_l2"].empty:
+                total_df = cache["df"][ ["yil", "buvol_m3", "buvol_sur_m2", "pop_person", "bvpc_m3_per_person", "bspc_m2_per_person", "vol_sur_ratio"] ].sort_values("yil").reset_index(drop=True)
+                years = total_df["yil"].values
+                l2 = cache["df_smod_l2"][ ["yil", "smod_l2_code", "buvol_m3", "buvol_sur_m2", "pop_person", "bvpc_m3_per_person", "bspc_m2_per_person", "vol_sur_ratio"] ].copy()
+                piv = {metric: l2.pivot_table(index="yil", columns="smod_l2_code", values=metric, aggfunc="first").reindex(years).fillna(np.nan) for metric in ["buvol_m3","buvol_sur_m2","pop_person","bvpc_m3_per_person","bspc_m2_per_person","vol_sur_ratio"]}
+                mpl.rcParams.update({'figure.dpi': dpi,'savefig.dpi': dpi,'axes.titlesize': 7,'axes.labelsize': 6,'xtick.labelsize': 5,'ytick.labelsize': 5,'legend.fontsize': 5,'axes.grid': True,'grid.linestyle': ':','grid.alpha': 0.5,})
+                fig, axes = plt.subplots(3, 2, figsize=(width_in, width_in * 5.33/6.85), constrained_layout=False)
+                axes = axes.ravel()
+                fig.patch.set_alpha(1.0)
+                total_color = "#1f77b4"
+                l2_color_map = {10: '#7AB6F5', 11: '#CDF57A', 12: '#ABCD66', 13: '#375623', 21: '#FFFF00', 22: '#A87000', 23: '#732600', 30: '#FF0000'}
+                series = [("buvol_m3","Building Volume (m³)"),("buvol_sur_m2","Building Surface (m²)"),("pop_person","Population (people)"),("bvpc_m3_per_person","BVPC (m³/person)"),("bspc_m2_per_person","BSPC (m²/person)"),("vol_sur_ratio","Volume/Surface Ratio")]
+                for i,(key,label) in enumerate(series):
+                    ax = axes[i]
+                    ax.plot(years, total_df[key].values, color=total_color, linewidth=1.6, label="Total")
+                    ax.scatter(years, total_df[key].values, s=6, color=total_color, edgecolor=total_color, facecolor="white", zorder=3)
+                    for cls in [10,11,12,13,21,22,23,30]:
+                        if cls in piv[key].columns:
+                            ax.plot(years, piv[key][cls].values, color=l2_color_map[cls], linewidth=0.9, label=str(cls))
+                    ax.set_title(label); ax.set_xlabel("Year"); ax.set_ylabel(label)
+                    ax.margins(x=0.02); ax.set_xticks(years); ax.tick_params(axis='x', rotation=0)
+                    try:
+                        ax.axvline(cur, color="#d62728", linestyle="--", linewidth=1.0, alpha=0.8)
+                    except Exception:
+                        pass
+                fig.suptitle("L2 Classes + Total", fontsize=7, fontweight='semibold')
+                fig.subplots_adjust(bottom=0.11, hspace=0.50)
+                from matplotlib.lines import Line2D
+                handles = [Line2D([0], [0], color=total_color, lw=3, label='Total')]
+                labels = ['Total']
+                l2_order = [10,11,12,13,21,22,23,30]
+                l2_label_map = {10:'10 Water/No data',11:'11 Very low density rural',12:'12 Low density rural',13:'13 Rural cluster',21:'21 Suburban/peri-urban',22:'22 Semi-dense urban',23:'23 Dense urban cluster',30:'30 Urban centre'}
+                for cls in l2_order:
+                    handles.append(Line2D([0], [0], color=l2_color_map[cls], lw=3))
+                    labels.append(l2_label_map[cls])
+                fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, -0.03), ncol=4, prop={'size':5}, handlelength=2, columnspacing=1.0, frameon=True, fancybox=True, shadow=True, edgecolor='black', facecolor='white', framealpha=0.9)
+                fpath = out_dir / f"ST-BESA_{prov}_plots_l2_{timestamp}.png"
+                import io
+                buf = io.BytesIO()
+                fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight', transparent=False, facecolor='white')
+                plt.close(fig)
+                buf.seek(0)
+                from PIL import Image
+                im = Image.open(buf)
+                target_w = int(round(width_in * dpi))
+                new_h = int(round(im.size[1] * (target_w / im.size[0])))
+                im_resized = im.resize((target_w, new_h), resample=Image.BICUBIC)
+                im_resized.save(str(fpath), format='PNG', dpi=(dpi, dpi))
+                saved.append(fpath)
+
+            ui_msg.value = f"<b style='color:green'>✓ Saved {len(saved)} plot(s) to folder:</b> {str(out_dir)}"
+        except Exception as e:
+            ui_msg.value = f"<b style='color:red'>Export failed: {str(e)}</b>"
+        finally:
+            set_busy(False)
+
+    export_plots_btn.on_click(on_export_plots_click)
+
+    save_layers_btn.on_click(on_save_layers_click)
 
     def _apply_manual_vis_and_render():
         # Update cached visualization ranges from manual fields and re-render

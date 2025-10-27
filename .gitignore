@@ -4,3 +4,5 @@ __pycache__/
 ocha_cod_tur.gpkg
 yedekler/
 *.mp4
+RESULTS/
+RESULTS.zip
