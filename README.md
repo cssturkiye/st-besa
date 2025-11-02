@@ -1,8 +1,21 @@
 # ST-BESA: Spatio-Temporal Built Environment & Settlement Analysis Platform
 ![ST-BESA Banner](img/st-besa-banner.png)
 
+[![Paper: Under Review](https://img.shields.io/badge/Paper-Under%20Review-orange)](#-about-the-paper)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+
+<div align="center">
+
+*ST-BESA: A low-code platform for spatio-temporal settlement analytics*
+
+**Evrim Çağın Polat¹** and **Evrim Yılmaz Polat²**  
+1 *Chief Technical Officer, Notrino Research*  
+2 *Department of Sociology, Zonguldak Bülent Ecevit University*
+
+</div>
+
+> We will update this README with a DOI link once available.
 
 Purpose
 -------
