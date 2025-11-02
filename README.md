@@ -1,11 +1,13 @@
 # ST-BESA: Spatio-Temporal Built Environment & Settlement Analysis Platform
 ![ST-BESA Banner](img/st-besa-banner.png)
 
+
+
+<div align="center">
+
 [![Paper: Under Review](https://img.shields.io/badge/Paper-Under%20Review-orange)](#-about-the-paper)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
-
-<div align="center">
 
 *ST-BESA: A low-code platform for spatio-temporal settlement analytics*
 
