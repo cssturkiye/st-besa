@@ -11,10 +11,6 @@
 
 *ST-BESA: A low-code platform for spatio-temporal settlement analytics*
 
-**Evrim Çağın Polat¹** and **Evrim Yılmaz Polat²**  
-1 *Chief Technical Officer, Notrino Research*  
-2 *Department of Sociology, Zonguldak Bülent Ecevit University*
-
 </div>
 
 > We will update this README with a DOI link once available.
