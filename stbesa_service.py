@@ -373,12 +373,15 @@ class STBESAAnalysis:
             "vol_sur_ratio": (float(vol_sur_ratio) if vol_sur_ratio is not None else None),
         }
 
-    def compute_smod_statistics(self, geom, year: int, level: str = "L1") -> Dict[int, Dict[str, float]]:
+    def compute_smod_statistics(self, geom, year: int, level: str = "L1", delay_seconds: float = 0.0) -> Dict[int, Dict[str, float]]:
         """
         Compute statistics per SMOD class (L1 or L2).
         Returns dict mapping class_code -> {buvol_m3, buvol_sur_m2, pop_person, bvpc_m3_per_person, bspc_m2_per_person, vol_sur_ratio}
+        
+        Args:
+            delay_seconds: Delay in seconds between reduceRegion calls to avoid rate limiting
         """
-        import ee
+        import ee, time
         self._ensure_ee()
         
         # Load images at appropriate scales (SMOD is 1km, others are 100m)
@@ -411,6 +414,10 @@ class STBESAAnalysis:
             tileScale=4
         ))
         
+        # Delay between reduceRegion calls to avoid rate limiting
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
+        
         # Reduce for surface
         sur_stats = self._ee_getinfo(ee.Image([sur, class_img]).reduceRegion(
             reducer=reducer,
@@ -419,6 +426,10 @@ class STBESAAnalysis:
             maxPixels=1e12,
             tileScale=4
         ))
+        
+        # Delay between reduceRegion calls to avoid rate limiting
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
         
         # Reduce for population
         pop_stats = self._ee_getinfo(ee.Image([pop, class_img]).reduceRegion(
@@ -770,11 +781,20 @@ class OCHACODLoader:
         return out_gpkg
 
 # --------------------------- Notebook UI helper ---------------------------
-def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
+def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025, ee_delay_seconds: float = 0.5):
     """
     Builds an interactive province/district picker with a Run button.
     - Handles missing district names by showing positional labels (e.g., "İlçe #01").
     - Uses STBESAAnalysis for EE/map logic.
+    
+    Args:
+        service: STBESAService instance
+        project_id: Google Earth Engine project ID
+        year: Default year for analysis
+        ee_delay_seconds: Delay in seconds between Earth Engine API calls to avoid rate limiting.
+                         Default 0.5 seconds. Increase if you get "Too many concurrent aggregations" errors.
+                         Recommended values: 0.5-2.0 seconds depending on your quota.
+    
     Returns a dict with ui and inner widgets for further control if needed.
     """
     import ipywidgets as W
@@ -1559,17 +1579,32 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
             cache["sur"][yy] = s
             cache["pop"][yy] = p
             cache["smod"][yy] = sm
-        # Batch sums
+        # Sequential sums with delays to avoid rate limiting (replaces batch toList().map() approach)
         ui_msg.value = "<b style='color:blue'>Computing statistics for all years (1975-2030)...</b>"
+        import time
         reducers = ee.Reducer.sum()
-        vol_ic = ee.ImageCollection.fromImages(vol_imgs)
-        sur_ic = ee.ImageCollection.fromImages(sur_imgs)
-        pop_ic = ee.ImageCollection.fromImages(pop_imgs)
-        sum_vol_list = vol_ic.toList(vol_ic.size()).map(lambda img: ee.Image(img).reduceRegion(reducer=reducers, geometry=geom, scale=100, maxPixels=1e12, tileScale=4).get('built_volume_total'))
-        sum_sur_list = sur_ic.toList(sur_ic.size()).map(lambda img: ee.Image(img).reduceRegion(reducer=reducers, geometry=geom, scale=100, maxPixels=1e12, tileScale=4).get('built_surface'))
-        sum_pop_list = pop_ic.toList(pop_ic.size()).map(lambda img: ee.Image(img).reduceRegion(reducer=reducers, geometry=geom, scale=100, maxPixels=1e12, tileScale=4).get('population_count'))
-        # Use robust getInfo wrapper to handle transient rate limits
-        sums = analyzer._ee_getinfo(ee.Dictionary({'vol': sum_vol_list, 'sur': sum_sur_list, 'pop': sum_pop_list}))
+        sum_vol_list = []
+        sum_sur_list = []
+        sum_pop_list = []
+        # Process each year sequentially with delays to avoid "Too many concurrent aggregations" error
+        for i, yy in enumerate(years_all):
+            vol_img = vol_imgs[i]
+            sur_img = sur_imgs[i]
+            pop_img = pop_imgs[i]
+            # Compute sums sequentially with delays
+            sum_vol = analyzer._ee_getinfo(vol_img.reduceRegion(reducer=reducers, geometry=geom, scale=100, maxPixels=1e12, tileScale=4).get('built_volume_total'))
+            if ee_delay_seconds > 0 and i < len(years_all) - 1:
+                time.sleep(ee_delay_seconds)
+            sum_sur = analyzer._ee_getinfo(sur_img.reduceRegion(reducer=reducers, geometry=geom, scale=100, maxPixels=1e12, tileScale=4).get('built_surface'))
+            if ee_delay_seconds > 0 and i < len(years_all) - 1:
+                time.sleep(ee_delay_seconds)
+            sum_pop = analyzer._ee_getinfo(pop_img.reduceRegion(reducer=reducers, geometry=geom, scale=100, maxPixels=1e12, tileScale=4).get('population_count'))
+            if ee_delay_seconds > 0 and i < len(years_all) - 1:
+                time.sleep(ee_delay_seconds)
+            sum_vol_list.append(sum_vol)
+            sum_sur_list.append(sum_sur)
+            sum_pop_list.append(sum_pop)
+        sums = {'vol': sum_vol_list, 'sur': sum_sur_list, 'pop': sum_pop_list}
         # Viz: auto_once computes percentiles once at current year; else per-year
         if auto_scale.value:
             ui_msg.value = "<b style='color:blue'>Computing color scale ranges...</b>"
@@ -1584,10 +1619,17 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
                     cache["vis"]["sur"][yy] = (vmin_s, vmax_s)
                     cache["vis"]["pop"][yy] = (vmin_p, vmax_p)
             else:
-                for yy, v, s, p in zip(years_all, vol_imgs, sur_imgs, pop_imgs):
+                import time
+                for i, (yy, v, s, p) in enumerate(zip(years_all, vol_imgs, sur_imgs, pop_imgs)):
                     vmin_v, vmax_v = analyzer.dynamic_stretch(v, "built_volume_total", geom, 80000, mask_zero=True, p_low=5, p_high=99)
+                    if ee_delay_seconds > 0 and i < len(years_all) - 1:
+                        time.sleep(ee_delay_seconds)
                     vmin_s, vmax_s = analyzer.dynamic_stretch(s, "built_surface", geom, 20000, mask_zero=True, p_low=5, p_high=99)
+                    if ee_delay_seconds > 0 and i < len(years_all) - 1:
+                        time.sleep(ee_delay_seconds)
                     vmin_p, vmax_p = analyzer.dynamic_stretch(p, "population_count",  geom, 200,   mask_zero=True, p_low=5, p_high=99)
+                    if ee_delay_seconds > 0 and i < len(years_all) - 1:
+                        time.sleep(ee_delay_seconds)
                     cache["vis"]["vol"][yy] = (vmin_v, vmax_v)
                     cache["vis"]["sur"][yy] = (vmin_s, vmax_s)
                     cache["vis"]["pop"][yy] = (vmin_p, vmax_p)
@@ -1626,10 +1668,11 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
 
         # Compute SMOD statistics for ALL years (needed for L1/L2 time-series plots)
         ui_msg.value = "<b style='color:blue'>Computing SMOD land-use classifications (all years)...</b>"
+        import time
         smod_l1_rows = []
         smod_l2_rows = []
-        for yy in years_all:
-            stats_l1 = analyzer.compute_smod_statistics(geom, yy, level="L1")
+        for i, yy in enumerate(years_all):
+            stats_l1 = analyzer.compute_smod_statistics(geom, yy, level="L1", delay_seconds=ee_delay_seconds)
             for cls_code, stats in stats_l1.items():
                 if cls_code in SMOD_L1_CLASSES:
                     smod_l1_rows.append({
@@ -1645,7 +1688,10 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
                         'bspc_m2_per_person': stats['bspc_m2_per_person'],
                         'vol_sur_ratio': stats['vol_sur_ratio']
                     })
-            stats_l2 = analyzer.compute_smod_statistics(geom, yy, level="L2")
+            # Delay between L1 and L2 computation for the same year
+            if ee_delay_seconds > 0:
+                time.sleep(ee_delay_seconds)
+            stats_l2 = analyzer.compute_smod_statistics(geom, yy, level="L2", delay_seconds=ee_delay_seconds)
             for cls_code, stats in stats_l2.items():
                 if cls_code in SMOD_L2_CLASSES:
                     smod_l2_rows.append({
@@ -1662,6 +1708,9 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
                         'bspc_m2_per_person': stats['bspc_m2_per_person'],
                         'vol_sur_ratio': stats['vol_sur_ratio']
                     })
+            # Delay between years (except for the last one)
+            if ee_delay_seconds > 0 and i < len(years_all) - 1:
+                time.sleep(ee_delay_seconds)
         cache["df_smod_l1"] = pd.DataFrame(smod_l1_rows)
         cache["df_smod_l2"] = pd.DataFrame(smod_l2_rows)
 
@@ -1753,9 +1802,10 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
                 # Compute full multi-year L1 if not computed
                 if cache["df_smod_l1"] is None or cache["df_smod_l1"].empty or len(cache["df_smod_l1"]["yil"].unique()) == 1:
                     ui_msg.value = "<b style='color:blue'>Computing SMOD L1 statistics for all years...</b>"
+                    import time
                     smod_l1_rows = []
-                    for yy in years_all:
-                        stats_l1 = STBESAAnalysis(project_id).compute_smod_statistics(cache["geom"], yy, level="L1")
+                    for i, yy in enumerate(years_all):
+                        stats_l1 = STBESAAnalysis(project_id).compute_smod_statistics(cache["geom"], yy, level="L1", delay_seconds=ee_delay_seconds)
                         for cls_code, stats in stats_l1.items():
                             if cls_code in SMOD_L1_CLASSES:
                                 smod_l1_rows.append({
@@ -1765,6 +1815,8 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
                                     'smod_l1_name': SMOD_L1_CLASSES[cls_code]['name'],
                                     **stats
                                 })
+                        if ee_delay_seconds > 0 and i < len(years_all) - 1:
+                            time.sleep(ee_delay_seconds)
                     cache["df_smod_l1"] = pd.DataFrame(smod_l1_rows)
                 ui_msg.value = "<b style='color:blue'>Writing SMOD L1 statistics...</b>"
                 # Sort L1 data by code and year for easy charting
@@ -1774,9 +1826,10 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
                 # Sheet 3: SMOD L2 statistics
                 if cache["df_smod_l2"] is None or cache["df_smod_l2"].empty or len(cache["df_smod_l2"]["yil"].unique()) == 1:
                     ui_msg.value = "<b style='color:blue'>Computing SMOD L2 statistics for all years...</b>"
+                    import time
                     smod_l2_rows = []
-                    for yy in years_all:
-                        stats_l2 = STBESAAnalysis(project_id).compute_smod_statistics(cache["geom"], yy, level="L2")
+                    for i, yy in enumerate(years_all):
+                        stats_l2 = STBESAAnalysis(project_id).compute_smod_statistics(cache["geom"], yy, level="L2", delay_seconds=ee_delay_seconds)
                         for cls_code, stats in stats_l2.items():
                             if cls_code in SMOD_L2_CLASSES:
                                 smod_l2_rows.append({
@@ -1787,6 +1840,8 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
                                     'smod_l1_parent': SMOD_L2_CLASSES[cls_code]['l1'],
                                     **stats
                                 })
+                        if ee_delay_seconds > 0 and i < len(years_all) - 1:
+                            time.sleep(ee_delay_seconds)
                     cache["df_smod_l2"] = pd.DataFrame(smod_l2_rows)
                 ui_msg.value = "<b style='color:blue'>Writing SMOD L2 statistics...</b>"
                 # Sort L2 data by code and year for easy charting
@@ -2361,13 +2416,21 @@ def build_picker_ui(service: STBESAService, project_id: str, year: int = 2025):
                 cache["vis"]["pop"][yy] = (vmin_p, vmax_p)
         else:
             # Compute per-year (SLOW)
-            for yy in cache["vol"].keys():
+            import time
+            vol_keys = list(cache["vol"].keys())
+            for i, yy in enumerate(vol_keys):
                 vol_y = cache["vol"][yy]
                 sur_y = cache["sur"][yy]
                 pop_y = cache["pop"][yy]
                 vmin_v, vmax_v = analyzer.dynamic_stretch(vol_y, "built_volume_total", geom, 80000, mask_zero=True, p_low=5, p_high=99)
+                if ee_delay_seconds > 0 and i < len(vol_keys) - 1:
+                    time.sleep(ee_delay_seconds)
                 vmin_s, vmax_s = analyzer.dynamic_stretch(sur_y, "built_surface", geom, 20000, mask_zero=True, p_low=5, p_high=99)
+                if ee_delay_seconds > 0 and i < len(vol_keys) - 1:
+                    time.sleep(ee_delay_seconds)
                 vmin_p, vmax_p = analyzer.dynamic_stretch(pop_y, "population_count",  geom, 200,   mask_zero=True, p_low=5, p_high=99)
+                if ee_delay_seconds > 0 and i < len(vol_keys) - 1:
+                    time.sleep(ee_delay_seconds)
                 cache["vis"]["vol"][yy] = (vmin_v, vmax_v)
                 cache["vis"]["sur"][yy] = (vmin_s, vmax_s)
                 cache["vis"]["pop"][yy] = (vmin_p, vmax_p)
