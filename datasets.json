@@ -1,0 +1,56 @@
+{
+    "TUR": {
+        "name": "Turkey (Türkiye)",
+        "file": "ocha_cod_tur.gpkg",
+        "format": "ocha",
+        "layer": "ADM2",
+        "adm1_col": "NAME_1",
+        "adm2_col": "NAME_2",
+        "adm1_label": "Province (İl)",
+        "adm2_label": "District (İlçe)",
+        "boundary_url": "https://github.com/cssturkiye/st-besa/releases/download/v1.0-data/ocha_cod_tur.gpkg",
+        "boundary_sha256": "sha256:572a91f01e3120eeb08d78f4f14ddcedc8ae713988c8ebee8735ad26ac6fade5"
+    },
+    "DEU": {
+        "name": "Germany (Deutschland)",
+        "file": "kontur_boundaries_DE_20230628.gpkg",
+        "format": "kontur",
+        "adm1_level": [
+            4,
+            7
+        ],
+        "adm2_level": [
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11
+        ],
+        "name_col": "name",
+        "adm1_label": "Region / City / State",
+        "adm2_label": "Sub-division (District/Gemeinde)",
+        "boundary_url": "https://github.com/cssturkiye/st-besa/releases/download/v1.0-data/kontur_boundaries_DE_20230628.gpkg",
+        "boundary_sha256": "sha256:125acd3762af000a0083deefee0a12ca1106029f8c63760a32ff9e54a9a94472"
+    },
+    "NLD": {
+        "name": "Netherlands (Nederland)",
+        "file": "kontur_boundaries_NL_20230628.gpkg",
+        "format": "kontur",
+        "adm1_level": [
+            10
+        ],
+        "adm2_level": [
+            10,
+            12,
+            14
+        ],
+        "name_col": "name",
+        "adm1_label": "Municipality / City (Gemeente)",
+        "adm2_label": "Sub-division (Woonplaats)",
+        "boundary_url": "https://github.com/cssturkiye/st-besa/releases/download/v1.0-data/kontur_boundaries_NL_20230628.gpkg",
+        "boundary_sha256": "sha256:2dced2abd13fff00246a2a98796d4f2a0d93a78e66a76abfbd2bf15f91c8a2eb"
+    }
+}
