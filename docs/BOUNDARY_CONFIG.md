@@ -85,17 +85,17 @@ Used when the dataset has **explicit columns** for administrative names (e.g., `
 }
 ```
 
-**Example (Turkey):**
+**Example (Türkiye):**
 ```json
 "TUR": {
-    "name": "Turkey (Türkiye)",
+    "name": "Türkiye (Turkey)",
     "file": "ocha_cod_tur.gpkg",
     "format": "ocha",
     "layer": "ADM2",
     "adm1_col": "NAME_1",
     "adm2_col": "NAME_2",
-    "adm1_label": "Province (İl)",
-    "adm2_label": "District (İlçe)"
+    "adm1_label": "Province",
+    "adm2_label": "District"
 }
 ```
 
@@ -116,6 +116,8 @@ Used when the dataset uses an **`admin_level`** column to distinguish administra
     "level_col": "admin_level" // Optional: column containing level info (default: "admin_level")
 }
 ```
+
+> **Note:** When `name_col` specifies a column like `name_en`, the loader automatically falls back to `name` for rows where `name_en` is null or empty. This ensures complete data coverage when using translated columns.
 
 **Example (Germany):**
 ```json
@@ -176,6 +178,16 @@ Admin levels follow the OpenStreetMap convention:
   - Self-referencing (Level 10 in ADM2) ensures all municipalities appear
   - Detailed neighborhood (Wijk/Buurt) data may require separate CBS datasets
 
+### Greece (GRC)
+- **Source**: Kontur Boundaries
+- **Format**: Level-based
+- **ADM1**: Regional Units (Level 6) – formerly Prefectures
+- **ADM2**: Municipalities (Level 9) – Dimos
+- **Notes**:
+  - Uses `name_en` column for English names with automatic fallback to Greek `name`
+  - Metropolitan Athens is split into 4 Regional Units (Central, North, South, West)
+  - 74 Regional Units containing 342 Municipalities
+
 ---
 
 ## Adding a New Country
@@ -194,7 +206,39 @@ Follow this step-by-step process to add a new country to the platform:
 
 ### Step 2: Inspect the Data Structure
 
-Run the following Python commands to understand the data:
+**Automated Inspection Tool:**
+
+ST-BESA provides a dedicated inspection script to analyze boundary files:
+
+```bash
+python tests/inspect_gpkg.py path/to/your_file.gpkg
+```
+
+This script automatically:
+- Lists all available columns
+- Identifies all admin levels present in the file
+- Shows sample names for each level (with English fallback if available)
+- Performs spatial containment checks between adjacent levels
+- Helps identify the correct ADM1/ADM2 level mapping
+
+**Example Output:**
+```
+--- Inspecting: kontur_boundaries_XX_20230628.gpkg ---
+Columns found: ['admin_level', 'name', 'name_en', 'population', 'geometry']
+Found 8 unique admin levels: [2, 4, 6, 7, 8, 9, 10, 11]
+
+Level 4 (Total: 16):
+  Names: State A, State B, ...
+
+--- Spatial Containment Analysis ---
+Checking: Level 6 (245 units) within Level 4 (16 units)?
+  ✓ 'District X' is inside 'State A'
+  ✓ 'District Y' is inside 'State B'
+```
+
+**Manual Inspection (Alternative):**
+
+If you prefer manual inspection:
 
 ```python
 import geopandas as gpd
@@ -280,7 +324,24 @@ Add the entry to `datasets.json`:
 
 Copy the boundary file to `boundaries/` directory.
 
-### Step 8: Test
+### Step 8: Validate with Unit Tests
+
+Once configured, run the unit test suite to verify your configuration and data integrity:
+
+```bash
+pytest tests/ -v
+```
+
+The test suite will automatically:
+1.  Detect your new entry in `datasets.json`
+2.  Verify the boundary file loads correctly
+3.  Check that Name and Geometry columns are valid
+4.  Confirm that Province/District lists are not empty
+5.  Validate CRS (should be EPSG:4326)
+
+If tests pass (Green), your configuration is technically sound.
+
+### Step 9: Manual Testing
 
 1. Restart the Gradio app
 2. Select the new country
@@ -330,18 +391,18 @@ print(sorted(gdf['admin_level'].dropna().unique().astype(int).tolist()))
 
 ---
 
-## Academic Methodology Notes
+## Alignment with European Statistical Frameworks
 
 ### NUTS/LAU Framework Alignment
 
 The ST-BESA configuration attempts to align with the European NUTS/LAU hierarchy:
 
-| ST-BESA Level | NUTS/LAU Equivalent | Turkey | Germany | Netherlands |
-|---------------|---------------------|--------|---------|-------------|
-| ADM1 | NUTS-3 / LAU-1 | İl (Province) | Kreis | Gemeente |
-| ADM2 | LAU-2 | İlçe (District) | Gemeinde | Wijk/Woonplaats |
+| ST-BESA Level | NUTS/LAU Equivalent | Türkiye | Germany | Netherlands | Greece |
+|---------------|---------------------|---------|---------|-------------|--------|
+| ADM1 | NUTS-3 / LAU-1 | Province (İl) | Kreis | Gemeente | Regional Unit |
+| ADM2 | LAU-2 | District (İlçe) | Gemeinde | Woonplaats | Municipality |
 
-### Methodological Considerations
+### Guidelines for Cross-Country Comparability
 
 1. **Comparability**: When comparing across countries, ensure similar administrative granularity (e.g., Population size ranges).
 

@@ -39,6 +39,24 @@ ST-BESA is a platform for computing built-environment indicators and settlement 
 | High-resolution export | 600 DPI map layers for publication |
 | Excel reports | Multi-sheet workbooks with data dictionary |
 
+## Supported Countries
+
+ST-BESA supports administrative boundary analysis for the following countries:
+
+| Flag | Country | Status | ADM1 (Province) | ADM2 (District) | Source |
+|:----:|---------|:------:|-----------------|-----------------|--------|
+| 🇩🇪 | Germany | ✅ Ready | State / City (L4, L7) | District / Gemeinde (L4–11) | Kontur |
+| 🇬🇷 | Greece | ✅ Ready | Regional Unit (L6) | Municipality (L9) | Kontur |
+| 🇳🇱 | Netherlands | ✅ Ready | Municipality (L10) | Settlement (L10–14) | Kontur |
+| 🇹🇷 | Türkiye | ✅ Ready | Province | District | OCHA COD |
+| 🇧🇪 | Belgium | 🔧 In Progress | — | — | — |
+| 🇫🇷 | France | 🔧 In Progress | — | — | — |
+| 🇮🇹 | Italy | 🔧 In Progress | — | — | — |
+| 🇬🇧 | United Kingdom | 🔧 In Progress | — | — | — |
+| 🌍 | Other EU Countries | 📋 Planned | — | — | — |
+
+> **Contributions Welcome!** To add a new country, see the [Boundary Configuration Guide](docs/BOUNDARY_CONFIG.md).
+
 ## Quick Start
 
 ### Local Installation

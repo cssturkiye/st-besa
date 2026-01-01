@@ -83,6 +83,14 @@ class GenericDatasetLoader:
             if name_col.upper() not in col_map:
                 raise ValueError(f"Name column '{name_col}' not found.")
             real_name_col = col_map[name_col.upper()]
+            
+            # Fallback Logic: If name_col is e.g. 'NAME_EN' and it has nulls, fill with 'NAME' if exists
+            if name_col.lower() != "name" and "NAME" in col_map:
+                fallback_col = col_map["NAME"]
+                # Create a temporary coalesced column
+                temp_name_col = f"__coalesced_{name_col}__"
+                gdf[temp_name_col] = gdf[real_name_col].fillna(gdf[fallback_col])
+                real_name_col = temp_name_col
 
             # Helper to filter by level (int or list)
             def filter_level(df, col, level):

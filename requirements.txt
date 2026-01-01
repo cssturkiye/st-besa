@@ -18,3 +18,4 @@ ipyleaflet>=0.18
 jupyter>=1.0
 notebook>=6.5
 gradio>=5.50
+pytest
