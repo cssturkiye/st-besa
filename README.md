@@ -53,7 +53,8 @@ ST-BESA supports administrative boundary analysis for the following countries:
 | 🇫🇷 | France | 🔧 In Progress | — | — | — |
 | 🇮🇹 | Italy | 🔧 In Progress | — | — | — |
 | 🇬🇧 | United Kingdom | 🔧 In Progress | — | — | — |
-| 🌍 | Other EU Countries | 📋 Planned | — | — | — |
+| 🇪🇺 | Other EU Countries | 📋 Planned | — | — | — |
+| 🌍 | Global South Expansion | 📋 Planned | — |Focus on data-scarce regions| — |
 
 > **Contributions Welcome!** To add a new country, see the [Boundary Configuration Guide](docs/BOUNDARY_CONFIG.md).
 
@@ -92,7 +93,7 @@ Click the **Open in Colab** badge above to run ST-BESA in the cloud without loca
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11+
 - Google Cloud Project with Earth Engine API enabled
 - See [requirements.txt](requirements.txt) for dependencies
 
@@ -102,8 +103,8 @@ If you use ST-BESA in your research, please cite:
 
 ```bibtex
 @article{stbesa2026,
-  title={ST-BESA: A Platform for Spatio-Temporal Built Environment and Settlement Analysis},
-  author={<Authors>},
+  title={ST-BESA: An Open-Source Low-Code Platform for Global Spatio-Temporal Settlement Analytics Using Google Earth Engine},
+  author={Polat, Evrim Yılmaz and Polat, Evrim Çağın},
   journal={SoftwareX},
   year={2026},
   note={Under Review}
