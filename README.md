@@ -27,7 +27,7 @@ ST-BESA is a platform for computing built-environment indicators and settlement 
 - **BSPC** (Building Surface Per Capita)
 - **SMOD Classification** (Degree of Urbanization L1/L2)
 
-![ST-BESA Demo](img/ST-BESA.gif)
+[![ST-BESA Demo](img/ST-BESA-v2-Cover.jpg)](img/ST-BESA-v2.mp4)
 
 ## Features
 
