@@ -8,6 +8,12 @@ Dynamically runs tests for each country in datasets.json.
 import pytest
 import os
 from pathlib import Path
+import sys
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from stbesa.service import STBESAService
 
 
@@ -119,6 +125,10 @@ class TestSTBESAServiceGeneral:
                 assert code in datasets_config
         finally:
             os.chdir(original_cwd)
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__]))
     
     def test_provinces_without_loading_raises_error(self, project_root):
         """Calling provinces() without loading should raise RuntimeError."""

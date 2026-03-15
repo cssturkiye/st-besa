@@ -60,25 +60,51 @@ ST-BESA supports administrative boundary analysis for the following countries:
 
 ## Quick Start
 
-### Local Installation
+Use this section as the primary first-time-user path. For detailed local setup and troubleshooting, see the [Installation Guide](docs/INSTALLATION.md). Once ST-BESA is running, see the [User Guide](docs/USER_GUIDE.md) for the interface walkthrough.
+
+### Google Colab (Recommended)
+
+Click the **Open in Colab** badge above to run ST-BESA in the cloud without local installation.
+
+The Colab notebook is the recommended zero-install reproducible path for most users. It clones the repository, installs the dependencies declared in `requirements.txt`, prompts for Google Earth Engine authentication, and launches the same Gradio application in the browser.
+
+### Local Launch
 
 ```bash
 git clone https://github.com/cssturkiye/st-besa.git
 cd st-besa
-pip install -r requirements.txt
+conda env create -f environment.yml
+conda activate stbesa
+# first local run only
+earthengine authenticate
 python app.py
 ```
 
-### Google Colab
+For a manual `venv` or `pip`-based alternative, see the [Installation Guide](docs/INSTALLATION.md).
 
-Click the **Open in Colab** badge above to run ST-BESA in the cloud without local installation.
+### Typical First Run
+
+1. Launch ST-BESA in Google Colab or locally using the command above.
+2. Authenticate Google Earth Engine if prompted and provide or confirm your project ID.
+3. Open the ST-BESA interface in the browser.
+4. Select a configured dataset, then choose a province/region and optional district.
+5. Keep the default visualization settings or adjust the manual controls.
+6. Click **Run Analysis** to compute the full 1975-2030 workflow.
+7. Review the generated maps, time-series plots, and data tables, then export Excel reports, plot images, or map-layer packages as needed.
+
+## Reproducibility and Outputs
+
+- `ST_BESA_Colab.ipynb` provides a reproducible zero-install execution route for the current codebase.
+- `environment.yml` provides a Conda-based local environment for dependency-stable installation.
+- `case-studies/` contains curated archived example outputs included in the repository for inspection.
+- `exports/` is a runtime output directory created when a user runs an analysis locally or through Colab; newly generated Excel files, plots, and map layers are written there for each run.
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [Installation Guide](docs/INSTALLATION.md) | Setup instructions and authentication |
-| [User Guide](docs/USER_GUIDE.md) | How to use the application |
+| [Installation Guide](docs/INSTALLATION.md) | Detailed local setup, authentication, and troubleshooting |
+| [User Guide](docs/USER_GUIDE.md) | Interface use after launch |
 | [Architecture](docs/ARCHITECTURE.md) | Technical design and module structure |
 | [Boundary Configuration](docs/BOUNDARY_CONFIG.md) | Adding new countries/datasets |
 
@@ -95,7 +121,7 @@ Click the **Open in Colab** badge above to run ST-BESA in the cloud without loca
 
 - Python 3.11+
 - Google Cloud Project with Earth Engine API enabled
-- See [requirements.txt](requirements.txt) for dependencies
+- See [environment.yml](environment.yml) for the recommended local Conda environment and [requirements.txt](requirements.txt) for the `pip` dependency list
 
 ## Citation
 

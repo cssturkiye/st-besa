@@ -1,6 +1,6 @@
 # Installation Guide
 
-This document describes the steps required to install and configure ST-BESA on a local machine.
+This document describes the steps required to install and configure ST-BESA on a local machine. If you only need the shortest first-run path, start with the [README Quick Start](../README.md#quick-start); this document focuses on complete local setup, authentication, and troubleshooting details.
 
 ## Prerequisites
 
@@ -19,7 +19,15 @@ cd st-besa
 
 ## Step 2: Create a Virtual Environment
 
-Using Conda (recommended):
+Using Conda from Miniconda or Anaconda (recommended for dependency stability):
+```bash
+conda env create -f environment.yml
+conda activate stbesa
+```
+
+This creates the tested local environment from the repository's `environment.yml` file.
+
+Using manual Conda creation:
 ```bash
 conda create -n stbesa python=3.11
 conda activate stbesa
@@ -35,6 +43,10 @@ source .venv/bin/activate
 ```
 
 ## Step 3: Install Dependencies
+
+If you used `conda env create -f environment.yml`, the dependencies are already installed and you can continue to Step 4.
+
+For manual Conda creation or `venv`, install the dependencies with:
 
 ```bash
 pip install -r requirements.txt
