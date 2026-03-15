@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Tuple, Optional
 from stbesa.service import STBESAService
 from stbesa.analysis import STBESAAnalysis
+from stbesa.constants import EXPORT_CONFIG
 from stbesa.exporter import STBESAExporter
 
 # SMOD Classification Metadata (from backup)
@@ -102,6 +103,15 @@ def on_province_change(prov):
     except Exception as e:
         raise gr.Error(f"Error loading districts: {str(e)}")
 
+
+def _get_plot_canvas_size() -> Tuple[float, float]:
+    """Return plot canvas size in inches based on export configuration."""
+    plot_config = EXPORT_CONFIG["plot"]
+    width_in = plot_config["width_mm"] / 25.4
+    height_in = width_in * plot_config["aspect_ratio"]
+    return width_in, height_in
+
+
 def _render_plots_l1(df_overall: pd.DataFrame, df_l1: pd.DataFrame, current_year: int):
     """Render 3x2 time-series plots for L1 classes + total (Exact replica of original logic)."""
     if df_overall is None or df_overall.empty:
@@ -122,7 +132,7 @@ def _render_plots_l1(df_overall: pd.DataFrame, df_l1: pd.DataFrame, current_year
         'axes.grid': True, 'grid.linestyle': ':', 'grid.alpha': 0.5
     })
     
-    fig, axes = plt.subplots(3, 2, figsize=(6.85, 5.33), constrained_layout=False)
+    fig, axes = plt.subplots(3, 2, figsize=_get_plot_canvas_size(), constrained_layout=False)
     axes = axes.ravel()
     fig.patch.set_alpha(0.0)
     
@@ -196,7 +206,7 @@ def _render_plots_l2(df_overall: pd.DataFrame, df_l2: pd.DataFrame, current_year
         'axes.grid': True, 'grid.linestyle': ':', 'grid.alpha': 0.5
     })
     
-    fig, axes = plt.subplots(3, 2, figsize=(6.85, 5.33), constrained_layout=False)
+    fig, axes = plt.subplots(3, 2, figsize=_get_plot_canvas_size(), constrained_layout=False)
     axes = axes.ravel()
     fig.patch.set_alpha(0.0)
     
@@ -744,6 +754,7 @@ def export_plots(state):
     # Use selected year from state if updated via slider, else fallback
     current_year = meta.get('Selected Year', 2025)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    plot_config = EXPORT_CONFIG["plot"]
     
     # Generate both plots
     fig_l1 = _render_plots_l1(df_overall, df_l1, current_year)
@@ -756,14 +767,24 @@ def export_plots(state):
     filename_l1 = f"ST-BESA_{province}_L1_plots_{timestamp}.png"
     path_l1 = os.path.join(exports_dir, filename_l1)
     if fig_l1:
-        fig_l1.savefig(path_l1, format='png', dpi=300, bbox_inches='tight', facecolor='white')
+        STBESAExporter.export_plots_as_png(
+            fig_l1,
+            path_l1,
+            dpi=plot_config["dpi"],
+            width_mm=plot_config["width_mm"],
+        )
         plt.close(fig_l1)
     
     # Save L2 plot
     filename_l2 = f"ST-BESA_{province}_L2_plots_{timestamp}.png"
     path_l2 = os.path.join(exports_dir, filename_l2)
     if fig_l2:
-        fig_l2.savefig(path_l2, format='png', dpi=300, bbox_inches='tight', facecolor='white')
+        STBESAExporter.export_plots_as_png(
+            fig_l2,
+            path_l2,
+            dpi=plot_config["dpi"],
+            width_mm=plot_config["width_mm"],
+        )
         plt.close(fig_l2)
     
     # Create ZIP with both plots

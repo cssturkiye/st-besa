@@ -13,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+import stbesa.analysis as analysis_module
 from stbesa.analysis import STBESAAnalysis
 
 
@@ -39,6 +40,34 @@ class _FakeImage:
 
     def reduceRegion(self, _reducer, **_kwargs):
         return _FakeReduceResult({self.band: self.values[(self.asset, self.band)]})
+
+
+def test_geemap_map_recovers_from_geemap_folium_basemaps_conflict(monkeypatch):
+    fake_geemap_pkg = SimpleNamespace(basemaps=SimpleNamespace(kind="broken-box"))
+    fake_basemaps_module = SimpleNamespace(kind="basemaps-module")
+    fake_folium_module = SimpleNamespace(
+        Map=lambda **kwargs: {"backend": "folium", "kwargs": kwargs}
+    )
+
+    def fake_import_module(name):
+        if name == "geemap":
+            return fake_geemap_pkg
+        if name == "geemap.basemaps":
+            return fake_basemaps_module
+        if name == "geemap.foliumap":
+            return fake_folium_module
+        raise AssertionError(f"Unexpected import: {name}")
+
+    monkeypatch.setattr(analysis_module.importlib, "import_module", fake_import_module)
+
+    analysis = STBESAAnalysis("test-project")
+    analysis._ee_initialized = True
+
+    result = analysis.geemap_map(height="480px", backend="folium")
+
+    assert result["backend"] == "folium"
+    assert result["kwargs"] == {"height": "480px", "ee_initialize": False}
+    assert fake_geemap_pkg.basemaps is fake_basemaps_module
 
 
 def test_compute_indicators_derives_ratios_and_zero_guards(monkeypatch):

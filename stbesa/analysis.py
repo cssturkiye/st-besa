@@ -1,5 +1,6 @@
 # stbesa/analysis.py
 
+import importlib
 import time
 from typing import Dict, Any, Tuple
 import pandas as pd
@@ -77,6 +78,20 @@ class STBESAAnalysis:
         if not self._ee_initialized:
             self.initialize_ee()
 
+    def _import_geemap_backend(self, backend: str = "folium"):
+        if backend == "ipyleaflet":
+            return importlib.import_module("geemap.geemap")
+
+        # geemap can expose a Box named `basemaps` on the package after the
+        # ipyleaflet backend loads. geemap.foliumap expects the basemaps module,
+        # so we restore that module before importing the folium backend.
+        geemap_pkg = importlib.import_module("geemap")
+        basemaps_module = importlib.import_module("geemap.basemaps")
+        if getattr(geemap_pkg, "basemaps", None) is not basemaps_module:
+            geemap_pkg.basemaps = basemaps_module
+
+        return importlib.import_module("geemap.foliumap")
+
     def _ee_get_mapid(self, image, vis_params: Dict[str, Any], max_retries: int = 5, backoff_factor: float = 0.6):
         """Preflight map tile creation with retries to avoid blank maps on transient 429s."""
         import ee, time
@@ -100,17 +115,13 @@ class STBESAAnalysis:
     def geemap_map(self, height: str = "700px", backend: str = "folium"):
         # backend: "folium" or "ipyleaflet"
         self._ensure_ee()
-        if backend == "ipyleaflet":
-            import geemap  # ipyleaflet backend
-            return geemap.Map(height=height, ee_initialize=False)
-        else:
-            import geemap.foliumap as geemap
-            return geemap.Map(height=height, ee_initialize=False)
+        geemap = self._import_geemap_backend(backend)
+        return geemap.Map(height=height, ee_initialize=False)
 
     def geopandas_row_to_ee(self, row: gpd.GeoDataFrame):
         import ee
-        import geemap
         self._ensure_ee()
+        geemap = self._import_geemap_backend("folium")
         fc = geemap.geopandas_to_ee(row, geodesic=False)
         feat = ee.Feature(fc.first())
         geom = feat.geometry()
