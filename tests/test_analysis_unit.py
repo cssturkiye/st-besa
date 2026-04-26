@@ -7,6 +7,7 @@ module with lightweight fakes.
 
 from types import SimpleNamespace
 from pathlib import Path
+import builtins
 import sys
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +76,26 @@ def test_compute_indicators_derives_ratios_and_zero_guards(monkeypatch):
     assert result_2025["bvpc_m3_per_person"] is None
     assert result_2025["bspc_m2_per_person"] is None
     assert result_2025["vol_sur_ratio"] == 4.0
+
+
+def test_default_map_backend_does_not_import_geemap_foliumap(monkeypatch):
+    real_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "geemap.foliumap" or name.startswith("geemap.foliumap."):
+            raise AssertionError("geemap.foliumap should not be imported")
+        return real_import(name, *args, **kwargs)
+
+    analysis = STBESAAnalysis("test-project")
+    analysis._ee_initialized = True
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    rendered_map = analysis.geemap_map(height="700px")
+
+    assert hasattr(rendered_map, "addLayer")
+    assert hasattr(rendered_map, "centerObject")
+    assert hasattr(rendered_map, "addLayerControl")
+    assert "leaflet" in rendered_map._repr_html_().lower()
 
 
 if __name__ == "__main__":

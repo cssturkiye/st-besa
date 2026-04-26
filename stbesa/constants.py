@@ -100,12 +100,13 @@ EXPORT_CONFIG = {
         "sheet_name_dict": "Data_Dictionary"
     },
     "plot": {
-        "dpi": 300,
-        "width_mm": 174,
+        "dpi": 1000,
+        "width_mm": 190,
         "aspect_ratio": 0.78
     },
     "map": {
-        "width_px": 4110,  # 174mm @ 600 DPI
+        "width_px": 4488,  # 190mm @ 600 DPI
+        "width_mm": 190,
         "dpi": 600
     }
 }

@@ -11,7 +11,15 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import pandas as pd
 
-from stbesa.exporter import STBESAExporter
+from stbesa.exporter import (
+    EXPORT_DPI,
+    EXPORT_WIDTH_MM,
+    PLOT_EXPORT_DPI,
+    PLOT_EXPORT_WIDTH_MM,
+    OSM_TEXT_ZOOM_OFFSET,
+    LayerExporter,
+    STBESAExporter,
+)
 
 
 def test_export_excel_report_creates_expected_workbook_structure(tmp_path: Path):
@@ -61,6 +69,117 @@ def test_export_excel_report_creates_expected_workbook_structure(tmp_path: Path)
     assert metadata_sheet["Parameter"].tolist() == ["Dataset", "Province"]
     assert "Programmatic Name" in dictionary_sheet.columns
     assert not dictionary_sheet.empty
+
+
+def test_export_resolution_settings_are_publication_defaults():
+    assert EXPORT_WIDTH_MM == 190.0
+    assert EXPORT_DPI == 600
+    assert PLOT_EXPORT_WIDTH_MM == 190.0
+    assert PLOT_EXPORT_DPI == 1000
+    assert OSM_TEXT_ZOOM_OFFSET == 0
+
+
+def test_export_plots_as_png_uses_configured_width_and_dpi(tmp_path: Path):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from PIL import Image
+
+    output_path = tmp_path / "plot.png"
+    fig, ax = plt.subplots(figsize=(2, 1))
+    ax.plot([0, 1], [0, 1])
+
+    try:
+        returned_path = STBESAExporter.export_plots_as_png(fig, str(output_path))
+    finally:
+        plt.close(fig)
+
+    assert returned_path == str(output_path)
+
+    with Image.open(output_path) as image:
+        expected_width_px = round((PLOT_EXPORT_WIDTH_MM / 25.4) * PLOT_EXPORT_DPI)
+        assert image.width == expected_width_px
+        assert round(image.info["dpi"][0]) == PLOT_EXPORT_DPI
+        assert round(image.info["dpi"][1]) == PLOT_EXPORT_DPI
+
+
+def test_export_plots_as_png_forces_white_background(tmp_path: Path):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from PIL import Image
+
+    output_path = tmp_path / "plot-white-bg.png"
+    fig, ax = plt.subplots(figsize=(2, 1))
+    fig.patch.set_alpha(0.0)
+    ax.patch.set_alpha(0.0)
+    ax.plot([0, 1], [0, 1])
+
+    try:
+        STBESAExporter.export_plots_as_png(fig, str(output_path))
+    finally:
+        plt.close(fig)
+
+    with Image.open(output_path) as image:
+        assert image.mode == "RGB"
+        assert image.getpixel((0, 0)) == (255, 255, 255)
+
+
+def test_osm_text_task_is_opt_in():
+    exporter = LayerExporter.__new__(LayerExporter)
+    exporter.include_osm_text = False
+
+    task_names = [name for name, _task in exporter._build_osm_tasks(Path("."), "20260101")]
+    assert task_names == ["OSM Background"]
+
+    exporter.include_osm_text = True
+    task_names = [name for name, _task in exporter._build_osm_tasks(Path("."), "20260101")]
+    assert task_names == ["OSM Background", "OSM Text"]
+
+
+def test_photoshop_script_uses_relative_script_folder(tmp_path: Path):
+    exporter = LayerExporter.__new__(LayerExporter)
+    exporter.dpi = EXPORT_DPI
+    out_dir = tmp_path / "STBESA_LAYERS_Test_20260101_120000"
+    out_dir.mkdir()
+
+    jsx_path = exporter._generate_photoshop_script(out_dir)
+    content = jsx_path.read_text(encoding="utf-8")
+
+    assert "var scriptFile = new File($.fileName);" in content
+    assert "var folder = scriptFile.parent;" in content
+    assert str(tmp_path) not in content
+    assert "STBESA_EXPORT_" not in content
+
+
+def test_vector_boundary_layer_draws_internal_district_lines(tmp_path: Path):
+    import geopandas as gpd
+    from PIL import Image
+    from shapely.geometry import box
+
+    boundary_gdf = gpd.GeoDataFrame(
+        geometry=[
+            box(0, 0, 100, 100),
+            box(100, 0, 200, 100),
+        ],
+        crs="EPSG:3857",
+    )
+    exporter = LayerExporter.__new__(LayerExporter)
+    exporter.boundary_gdf = boundary_gdf
+    exporter.bounds_3857 = {"w": 0, "e": 200, "s": 0, "n": 100}
+    exporter.out_width_px = 200
+    exporter.target_height_px = 100
+    exporter.province = "Test"
+    exporter.dpi = EXPORT_DPI
+
+    path = exporter._save_vector_boundary_layer(tmp_path, "20260101_120000")
+
+    with Image.open(path) as image:
+        assert image.size == (200, 100)
+        # The shared edge between the two source polygons should be visible.
+        assert any(image.getpixel((100, y))[3] > 0 for y in range(10, 90))
 
 
 if __name__ == "__main__":

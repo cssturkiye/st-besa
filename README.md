@@ -36,7 +36,7 @@ ST-BESA is a platform for computing built-environment indicators and settlement 
 | Multi-year analysis | Compute indicators for years 1975–2030 (5-year intervals) |
 | Instant year switching | Switch between years without re-computation |
 | Auto/Manual scaling | Percentile-based or user-defined visualization ranges |
-| High-resolution export | 600 DPI map layers for publication |
+| High-resolution export | 190 mm map layers at 600 DPI and plot exports at 1000 DPI |
 | Excel reports | Multi-sheet workbooks with data dictionary |
 
 ## Supported Countries
@@ -95,7 +95,7 @@ For a manual `venv` or `pip`-based alternative, see the [Installation Guide](doc
 ## Reproducibility and Outputs
 
 - `ST_BESA_Colab.ipynb` provides a reproducible zero-install execution route for the current codebase.
-- `environment.yml` provides a Conda-based local environment for dependency-stable installation.
+- `environment.yml` creates the local Conda Python environment and installs the application dependencies from `requirements.txt`.
 - `case-studies/` contains curated archived example outputs included in the repository for inspection.
 - `exports/` is a runtime output directory created when a user runs an analysis locally or through Colab; newly generated Excel files, plots, and map layers are written there for each run.
 
@@ -121,7 +121,7 @@ For a manual `venv` or `pip`-based alternative, see the [Installation Guide](doc
 
 - Python 3.11+
 - Google Cloud Project with Earth Engine API enabled
-- See [environment.yml](environment.yml) for the recommended local Conda environment and [requirements.txt](requirements.txt) for the `pip` dependency list
+- See [environment.yml](environment.yml) for the local Conda environment and [requirements.txt](requirements.txt) for the required Python packages
 
 ## Citation
 

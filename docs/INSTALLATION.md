@@ -25,7 +25,7 @@ conda env create -f environment.yml
 conda activate stbesa
 ```
 
-This creates the tested local environment from the repository's `environment.yml` file.
+This creates the local Python environment from the repository's `environment.yml` file and installs application dependencies from `requirements.txt`.
 
 Using manual Conda creation:
 ```bash
@@ -44,9 +44,9 @@ source .venv/bin/activate
 
 ## Step 3: Install Dependencies
 
-If you used `conda env create -f environment.yml`, the dependencies are already installed and you can continue to Step 4.
+If you created the environment with `conda env create -f environment.yml`, dependencies are already installed and you can continue to Step 4.
 
-For manual Conda creation or `venv`, install the dependencies with:
+For manual Conda creation or `venv`, install the application dependencies with:
 
 ```bash
 pip install -r requirements.txt

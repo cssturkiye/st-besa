@@ -19,11 +19,16 @@ TURBO_PALETTE = ['#30123b','#4145ab','#2e7de0','#1db6d7','#27d39b','#7be151','#c
 L2_PALETTE_MAP = {10: '#7AB6F5', 11: '#CDF57A', 12: '#ABCD66', 13: '#375623', 21: '#FFFF00', 22: '#A87000', 23: '#732600', 30: '#FF0000'}
 
 # Export settings
-EXPORT_WIDTH_MM = 174.0
-EXPORT_DPI = 300
+EXPORT_WIDTH_MM = 190.0
+EXPORT_DPI = 600
+PLOT_EXPORT_WIDTH_MM = 190.0
+PLOT_EXPORT_DPI = 1000
 LEGEND_TITLE_FONT_PX = 48
 LEGEND_TEXT_FONT_PX = 36
-OSM_LABELS_ZOOM_BOOST = 1
+OSM_TEXT_ZOOM_OFFSET = 0
+BOUNDARY_LINE_WIDTH_PX = 9
+BOUNDARY_SUPERSAMPLE = 3
+SMOD_LEGEND_SCALE_MULTIPLIER = 1.5
 
 
 class STBESAExporter:
@@ -90,7 +95,12 @@ class STBESAExporter:
         return output_path
     
     @staticmethod
-    def export_plots_as_png(fig, output_path: str, dpi: int = 300, width_mm: float = 174) -> str:
+    def export_plots_as_png(
+        fig,
+        output_path: str,
+        dpi: int = PLOT_EXPORT_DPI,
+        width_mm: float = PLOT_EXPORT_WIDTH_MM,
+    ) -> str:
         """
         Export matplotlib figure as PNG at specified DPI and width.
         """
@@ -99,13 +109,43 @@ class STBESAExporter:
         width_in = width_mm / 25.4
         target_w = int(round(width_in * dpi))
         
-        # Save to buffer
+        original_fig_facecolor = fig.get_facecolor()
+        original_fig_alpha = fig.patch.get_alpha()
+        original_ax_states = [
+            (ax, ax.get_facecolor(), ax.patch.get_alpha())
+            for ax in fig.axes
+        ]
+
         buf = io.BytesIO()
-        fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight', facecolor='white')
-        buf.seek(0)
+        try:
+            fig.patch.set_facecolor('white')
+            fig.patch.set_alpha(1.0)
+            for ax, _facecolor, _alpha in original_ax_states:
+                ax.set_facecolor('white')
+                ax.patch.set_alpha(1.0)
+
+            fig.savefig(
+                buf,
+                format='png',
+                dpi=dpi,
+                bbox_inches='tight',
+                facecolor='white',
+                edgecolor='white',
+                transparent=False,
+            )
+            buf.seek(0)
+        finally:
+            fig.patch.set_facecolor(original_fig_facecolor)
+            fig.patch.set_alpha(original_fig_alpha)
+            for ax, facecolor, alpha in original_ax_states:
+                ax.set_facecolor(facecolor)
+                ax.patch.set_alpha(alpha)
         
         # Resize to exact width
-        im = Image.open(buf)
+        im = Image.open(buf).convert('RGBA')
+        white_bg = Image.new('RGBA', im.size, (255, 255, 255, 255))
+        white_bg.alpha_composite(im)
+        im = white_bg.convert('RGB')
         new_h = int(round(im.size[1] * (target_w / im.size[0])))
         im_resized = im.resize((target_w, new_h), resample=Image.BICUBIC)
         im_resized.save(output_path, format='PNG', dpi=(dpi, dpi))
@@ -116,10 +156,19 @@ class STBESAExporter:
 class LayerExporter:
     """
     Exports high-resolution map layers as transparent PNGs for publication.
-    Matches backup functionality exactly: 174mm @ 600 DPI.
+    Exports publication layers at 190mm @ 600 DPI.
     """
     
-    def __init__(self, analysis_service, ee_geom, year: int, province: str, vis_params: Dict):
+    def __init__(
+        self,
+        analysis_service,
+        ee_geom,
+        year: int,
+        province: str,
+        vis_params: Dict,
+        include_osm_text: bool = False,
+        boundary_gdf=None,
+    ):
         """
         Initialize layer exporter.
         
@@ -129,12 +178,16 @@ class LayerExporter:
             year: Year to export
             province: Province name for file naming
             vis_params: Visualization parameters dict with 'vol', 'sur', 'pop' keys
+            include_osm_text: Whether to export the separate OSM text overlay layer
+            boundary_gdf: Original district boundary GeoDataFrame for high-resolution outlines
         """
         self.analysis = analysis_service
         self.geom = ee_geom
         self.year = year
         self.province = province.replace(' ', '_')
         self.vis_params = vis_params
+        self.include_osm_text = include_osm_text
+        self.boundary_gdf = boundary_gdf
         
         # Output settings
         self.dpi = EXPORT_DPI
@@ -270,10 +323,10 @@ class LayerExporter:
             
         overlay = Image.open(io.BytesIO(data)).convert('RGBA')
         
-        # Upscale to target 174mm width at 600 DPI with NEAREST to preserve pixel edges
+        # Upscale to target export width and DPI with NEAREST to preserve pixel edges
         up_overlay = overlay.resize((self.out_width_px, self.target_height_px), resample=Image.NEAREST)
         
-        # Save transparent overlay with 600 DPI
+        # Save transparent overlay with configured DPI
         try:
             up_overlay.save(str(fpath), format='PNG', dpi=(self.dpi, self.dpi))
         except Exception:
@@ -281,6 +334,100 @@ class LayerExporter:
         
         print(f"[LayerExporter] Saved {short_name} -> {fpath.name}")
         return fpath
+
+    def _save_ee_boundary_layer(self, out_dir: Path, timestamp: str) -> Optional[Path]:
+        """Fallback boundary export using Earth Engine rasterization."""
+        import ee
+
+        outline = ee.Image().byte().paint(
+            ee.FeatureCollection([ee.Feature(self.geom)]), 1, 2
+        ).visualize(min=0, max=1, palette=['000000'])
+        return self._save_ee_layer(outline, "boundary", "07", out_dir, timestamp)
+
+    def _save_vector_boundary_layer(self, out_dir: Path, timestamp: str) -> Path:
+        """Render district boundaries from source vector geometries at final PNG resolution."""
+        from PIL import Image, ImageDraw
+        from shapely.geometry import GeometryCollection, LineString, MultiLineString, MultiPolygon, Polygon
+
+        if self.boundary_gdf is None or getattr(self.boundary_gdf, "empty", True):
+            raise ValueError("No source boundary GeoDataFrame available")
+
+        gdf = self.boundary_gdf
+        if gdf.crs is None:
+            gdf = gdf.set_crs("EPSG:4326", allow_override=True)
+        gdf = gdf.to_crs("EPSG:3857")
+
+        scale = BOUNDARY_SUPERSAMPLE
+        width = int(self.out_width_px)
+        height = int(self.target_height_px)
+        wm, sm, em, nm = (
+            self.bounds_3857['w'],
+            self.bounds_3857['s'],
+            self.bounds_3857['e'],
+            self.bounds_3857['n'],
+        )
+        sx = (width * scale) / max(1e-9, em - wm)
+        sy = (height * scale) / max(1e-9, nm - sm)
+
+        def project_point(x, y):
+            return (int(round((x - wm) * sx)), int(round((nm - y) * sy)))
+
+        img = Image.new('RGBA', (width * scale, height * scale), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        line_width = max(1, int(round(BOUNDARY_LINE_WIDTH_PX * scale)))
+
+        def draw_line(coords):
+            pts = [project_point(x, y) for x, y, *_rest in coords]
+            if len(pts) >= 2:
+                try:
+                    draw.line(pts, fill=(0, 0, 0, 255), width=line_width, joint="curve")
+                except TypeError:
+                    draw.line(pts, fill=(0, 0, 0, 255), width=line_width)
+
+        def draw_geom(geom):
+            if geom is None or geom.is_empty:
+                return
+            if isinstance(geom, Polygon):
+                draw_line(geom.exterior.coords)
+                for interior in geom.interiors:
+                    draw_line(interior.coords)
+            elif isinstance(geom, MultiPolygon):
+                for part in geom.geoms:
+                    draw_geom(part)
+            elif isinstance(geom, LineString):
+                draw_line(geom.coords)
+            elif isinstance(geom, MultiLineString):
+                for part in geom.geoms:
+                    draw_geom(part)
+            elif isinstance(geom, GeometryCollection):
+                for part in geom.geoms:
+                    draw_geom(part)
+
+        for geom in gdf.geometry:
+            draw_geom(geom)
+
+        try:
+            resample = Image.Resampling.LANCZOS
+        except AttributeError:
+            resample = Image.LANCZOS
+        img = img.resize((width, height), resample=resample)
+
+        fpath = out_dir / f"07_ST-BESA_{self.province}_boundary_{timestamp}.png"
+        img.save(str(fpath), format='PNG', dpi=(self.dpi, self.dpi))
+        print(f"[LayerExporter] Saved high-resolution vector boundary -> {fpath.name}")
+        return fpath
+
+    def _save_boundary_layer(self, out_dir: Path, timestamp: str) -> Optional[Path]:
+        """Save boundary layer, preferring original district vectors over EE raster fallback."""
+        try:
+            return self._save_vector_boundary_layer(out_dir, timestamp)
+        except Exception as e:
+            print(f"[WARN] Vector boundary export failed, falling back to EE boundary: {e}")
+            return self._save_ee_boundary_layer(out_dir, timestamp)
+
+    def _legend_scale(self) -> float:
+        """Scale legend graphics with export DPI so physical print size stays readable."""
+        return max(1.0, self.dpi / 300.0)
     
     def _save_continuous_legend(self, path: Path, title: str, vmin: float, vmax: float):
         """Save a continuous colorbar legend as PNG."""
@@ -295,15 +442,18 @@ class LayerExporter:
                 except Exception:
                     return ImageFont.load_default()
         
-        bar_width = 1000
-        bar_height = 60
-        margin = 24
-        title_font = load_font(LEGEND_TITLE_FONT_PX)
-        text_font = load_font(LEGEND_TEXT_FONT_PX)
+        scale = self._legend_scale()
+        bar_width = int(round(1000 * scale))
+        bar_height = int(round(60 * scale))
+        margin = int(round(24 * scale))
+        title_font = load_font(int(round(LEGEND_TITLE_FONT_PX * scale)))
+        text_font = load_font(int(round(LEGEND_TEXT_FONT_PX * scale)))
         title_height = title_font.size
         labels_height = text_font.size
         width = bar_width + margin * 2
-        total_height = margin + title_height + 8 + bar_height + 6 + labels_height + margin
+        gap_title = int(round(8 * scale))
+        gap_labels = int(round(6 * scale))
+        total_height = margin + title_height + gap_title + bar_height + gap_labels + labels_height + margin
         
         img = Image.new('RGBA', (width, total_height), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
@@ -319,23 +469,24 @@ class LayerExporter:
                 t = i / max(1, bar_width - 1)
                 rgba = turbo_cmap(t)
                 color = tuple(int(c * 255) for c in rgba[:3])
-                d.line([(margin + i, margin + title_height + 8), (margin + i, margin + title_height + 8 + bar_height)], fill=color)
+                d.line([(margin + i, margin + title_height + gap_title), (margin + i, margin + title_height + gap_title + bar_height)], fill=color)
         except Exception:
             # Fallback to discrete colors
             for i in range(bar_width):
                 t = i / max(1, bar_width - 1)
                 idx = int(t * (len(TURBO_PALETTE) - 1))
-                d.line([(margin + i, margin + title_height + 8), (margin + i, margin + title_height + 8 + bar_height)], fill=TURBO_PALETTE[idx])
+                d.line([(margin + i, margin + title_height + gap_title), (margin + i, margin + title_height + gap_title + bar_height)], fill=TURBO_PALETTE[idx])
         
         # Min/max labels
         txt_min = f"{vmin:.1f}"
         txt_max = f"{vmax:.1f}"
-        d.text((margin, margin + title_height + 8 + bar_height + 6), txt_min, fill=(0,0,0,255), font=text_font)
+        label_y = margin + title_height + gap_title + bar_height + gap_labels
+        d.text((margin, label_y), txt_min, fill=(0,0,0,255), font=text_font)
         try:
             tw = d.textlength(txt_max, font=text_font)
         except Exception:
             tw = len(txt_max) * text_font.size * 0.6
-        d.text((margin + bar_width - int(tw), margin + title_height + 8 + bar_height + 6), txt_max, fill=(0,0,0,255), font=text_font)
+        d.text((margin + bar_width - int(tw), label_y), txt_max, fill=(0,0,0,255), font=text_font)
         
         img.save(str(path), format='PNG', dpi=(self.dpi, self.dpi))
         
@@ -352,31 +503,70 @@ class LayerExporter:
                 except Exception:
                     return ImageFont.load_default()
         
+        scale = self._legend_scale() * SMOD_LEGEND_SCALE_MULTIPLIER
         width = int(self.out_width_px / 2.0)
-        margin = 12
-        title_font = load_font(LEGEND_TITLE_FONT_PX)
-        text_font = load_font(LEGEND_TEXT_FONT_PX)
-        row_h = max(24, int(text_font.size * 1.2))
+        margin = int(round(12 * scale))
+        title_font = load_font(int(round(LEGEND_TITLE_FONT_PX * scale)))
+        text_font = load_font(int(round(LEGEND_TEXT_FONT_PX * scale)))
+        row_h = max(int(round(24 * scale)), int(text_font.size * 1.2))
         title_h = title_font.size
-        box_size = max(18, int(text_font.size * 0.9))
-        height = margin + title_h + 6 + len(items) * row_h + margin
+        box_size = max(int(round(18 * scale)), int(text_font.size * 0.9))
+        gap = int(round(6 * scale))
+        text_gap = int(round(8 * scale))
+        height = margin + title_h + gap + len(items) * row_h + margin
         
         img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
         d.text((margin, margin), title, fill=(0,0,0,255), font=title_font)
         
-        y = margin + title_h + 6
+        y = margin + title_h + gap
         for label, color in items:
             d.rectangle((margin, y, margin + box_size, y + box_size), fill=color, outline=(60,60,60,255))
-            d.text((margin + box_size + 8, y), label, fill=(0,0,0,255), font=text_font)
+            d.text((margin + box_size + text_gap, y), label, fill=(0,0,0,255), font=text_font)
             y += row_h
             
         img.save(str(path), format='PNG', dpi=(self.dpi, self.dpi))
+
+    def _save_osm_background_layer(self, out_dir: Path, timestamp: str) -> Path:
+        """Save the no-label OSM background layer."""
+        nolabels_tpl = "https://basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png"
+        osm_bg = self._fetch_xyz_layer(
+            self.out_width_px,
+            self.target_height_px,
+            nolabels_tpl,
+            zoom_boost=0,
+        ).convert('RGB')
+        osm_bg_path = out_dir / f"01_ST-BESA_{self.province}_openstreetmap-bg_{timestamp}.png"
+        osm_bg.save(str(osm_bg_path), format='PNG', dpi=(self.dpi, self.dpi))
+        return osm_bg_path
+
+    def _save_osm_text_layer(self, out_dir: Path, timestamp: str) -> Path:
+        """Save the optional OSM labels-only overlay layer."""
+        labels_tpl = "https://basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png"
+        osm_lbl = self._fetch_xyz_layer(
+            self.out_width_px,
+            self.target_height_px,
+            labels_tpl,
+            zoom_boost=OSM_TEXT_ZOOM_OFFSET,
+        ).convert('RGBA')
+        osm_lbl_path = out_dir / f"08_ST-BESA_{self.province}_openstreetmap-text_{timestamp}.png"
+        osm_lbl.save(str(osm_lbl_path), format='PNG', dpi=(self.dpi, self.dpi))
+        return osm_lbl_path
+
+    def _build_osm_tasks(self, out_dir: Path, timestamp: str):
+        """Return OSM export tasks based on the user's text-overlay choice."""
+        tasks = [
+            ("OSM Background", lambda: self._save_osm_background_layer(out_dir, timestamp)),
+        ]
+        if self.include_osm_text:
+            tasks.append(("OSM Text", lambda: self._save_osm_text_layer(out_dir, timestamp)))
+        return tasks
     
     def _generate_photoshop_script(self, out_dir: Path) -> Path:
         """Generate Photoshop JSX script to load and stack layers."""
         jsx = (
-            "var folder = new Folder('" + str(out_dir).replace('\\', '/') + "');\n" +
+            "var scriptFile = new File($.fileName);\n" +
+            "var folder = scriptFile.parent;\n" +
             "var files = folder.getFiles(/\\.png$/i).sort(function(a,b){ return (decodeURI(a.name) > decodeURI(b.name)) ? 1 : -1; });\n" +
             "if(files.length>0){\n" +
             "  var base = app.open(files[0]);\n" +
@@ -406,7 +596,8 @@ class LayerExporter:
         
         # Create output directory
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_dir = Path.cwd() / f"STBESA_EXPORT_{self.province}_{timestamp}"
+        out_dirname = f"STBESA_LAYERS_{self.province}_{timestamp}"
+        out_dir = Path.cwd() / "exports" / out_dirname
         out_dir.mkdir(parents=True, exist_ok=True)
         
         saved = []
@@ -432,9 +623,6 @@ class LayerExporter:
         l1_palette = [SMOD_L1_CLASSES[1]["color"], SMOD_L1_CLASSES[2]["color"], SMOD_L1_CLASSES[3]["color"]]
         smod_l1_vis = smod_l1.updateMask(smod_mask).visualize(min=1, max=3, palette=l1_palette)
         
-        # Boundary
-        outline = ee.Image().byte().paint(ee.FeatureCollection([ee.Feature(self.geom)]), 1, 2).visualize(min=0, max=1, palette=['000000'])
-        
         # Save data layers
         layers_to_save = [
             ("02", "smod-l2", smod_l2_vis),
@@ -442,7 +630,6 @@ class LayerExporter:
             ("04", "population", pop_vis),
             ("05", "surface", sur_vis),
             ("06", "volume", vol_vis),
-            ("07", "boundary", outline),
         ]
         
         for prefix, short_name, img in layers_to_save:
@@ -452,26 +639,30 @@ class LayerExporter:
                     saved.append(fpath)
             except Exception as e:
                 print(f"[WARN] Failed to save layer {short_name}: {e}")
+
+        try:
+            fpath = self._save_boundary_layer(out_dir, timestamp)
+            if fpath:
+                saved.append(fpath)
+        except Exception as e:
+            print(f"[WARN] Failed to save boundary: {e}")
         
         # Save OSM background
         try:
-            nolabels_tpl = "https://basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png"
-            osm_bg = self._fetch_xyz_layer(self.out_width_px, self.target_height_px, nolabels_tpl, zoom_boost=0).convert('RGB')
-            osm_bg_path = out_dir / f"01_ST-BESA_{self.province}_openstreetmap-bg_{timestamp}.png"
-            osm_bg.save(str(osm_bg_path), format='PNG', dpi=(self.dpi, self.dpi))
+            osm_bg_path = self._save_osm_background_layer(out_dir, timestamp)
             saved.append(osm_bg_path)
         except Exception as e:
             print(f"[WARN] Failed to save OSM background: {e}")
         
         # Save OSM labels
-        try:
-            labels_tpl = "https://basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png"
-            osm_lbl = self._fetch_xyz_layer(self.out_width_px, self.target_height_px, labels_tpl, zoom_boost=OSM_LABELS_ZOOM_BOOST).convert('RGBA')
-            osm_lbl_path = out_dir / f"08_ST-BESA_{self.province}_openstreetmap-text_{timestamp}.png"
-            osm_lbl.save(str(osm_lbl_path), format='PNG', dpi=(self.dpi, self.dpi))
-            saved.append(osm_lbl_path)
-        except Exception as e:
-            print(f"[WARN] Failed to save OSM labels: {e}")
+        if self.include_osm_text:
+            try:
+                osm_lbl_path = self._save_osm_text_layer(out_dir, timestamp)
+                saved.append(osm_lbl_path)
+            except Exception as e:
+                print(f"[WARN] Failed to save OSM labels: {e}")
+        else:
+            print("[LayerExporter] Skipping OSM text overlay")
         
         # Save legends
         try:
@@ -510,7 +701,7 @@ class LayerExporter:
         import zipfile
         import shutil
         
-        zip_filename = f"STBESA_LAYERS_{self.province}_{timestamp}.zip"
+        zip_filename = f"{out_dirname}.zip"
         zip_path = Path.cwd() / "exports" / zip_filename
         zip_path.parent.mkdir(exist_ok=True)
         
@@ -543,7 +734,7 @@ class LayerExporter:
         
         # Create output directory
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_dirname = f"STBESA_EXPORT_{self.province}_{timestamp}"
+        out_dirname = f"STBESA_LAYERS_{self.province}_{timestamp}"
         out_dir = Path.cwd() / "exports" / out_dirname
         out_dir.mkdir(parents=True, exist_ok=True)
         
@@ -569,27 +760,13 @@ class LayerExporter:
         l1_palette = [SMOD_L1_CLASSES[1]["color"], SMOD_L1_CLASSES[2]["color"], SMOD_L1_CLASSES[3]["color"]]
         smod_l1_vis = smod_l1.updateMask(smod_mask).visualize(min=1, max=3, palette=l1_palette)
         
-        # Boundary
-        outline = ee.Image().byte().paint(ee.FeatureCollection([ee.Feature(self.geom)]), 1, 2).visualize(min=0, max=1, palette=['000000'])
-        
         # Tasks definitions
         def task_save_ee(args):
             prefix, short_name, img = args
             return self._save_ee_layer(img, short_name, prefix, out_dir, timestamp)
-            
-        def task_save_osm_bg():
-            nolabels_tpl = "https://basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png"
-            osm_bg = self._fetch_xyz_layer(self.out_width_px, self.target_height_px, nolabels_tpl, zoom_boost=0).convert('RGB')
-            osm_bg_path = out_dir / f"01_ST-BESA_{self.province}_openstreetmap-bg_{timestamp}.png"
-            osm_bg.save(str(osm_bg_path), format='PNG', dpi=(self.dpi, self.dpi))
-            return osm_bg_path
-            
-        def task_save_osm_lbl():
-            labels_tpl = "https://basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png"
-            osm_lbl = self._fetch_xyz_layer(self.out_width_px, self.target_height_px, labels_tpl, zoom_boost=OSM_LABELS_ZOOM_BOOST).convert('RGBA')
-            osm_lbl_path = out_dir / f"08_ST-BESA_{self.province}_openstreetmap-text_{timestamp}.png"
-            osm_lbl.save(str(osm_lbl_path), format='PNG', dpi=(self.dpi, self.dpi))
-            return osm_lbl_path
+
+        def task_save_boundary():
+            return self._save_boundary_layer(out_dir, timestamp)
             
         def task_save_legends():
             self._save_continuous_legend(out_dir / f"09_ST-BESA_{self.province}_legend_volume_{timestamp}.png", "Building volume (m³)", vmin_vol, vmax_vol)
@@ -623,7 +800,6 @@ class LayerExporter:
             ("04", "population", pop_vis),
             ("05", "surface", sur_vis),
             ("06", "volume", vol_vis),
-            ("07", "boundary", outline),
         ]
         
         futures_map = {}
@@ -634,10 +810,12 @@ class LayerExporter:
             # Submit EE tasks
             for item in ee_layers:
                 futures_map[executor.submit(task_save_ee, item)] = f"Layer {item[1]}"
+
+            futures_map[executor.submit(task_save_boundary)] = "Boundary"
             
             # Submit OSM tasks
-            futures_map[executor.submit(task_save_osm_bg)] = "OSM Background"
-            futures_map[executor.submit(task_save_osm_lbl)] = "OSM Labels"
+            for name, task in self._build_osm_tasks(out_dir, timestamp):
+                futures_map[executor.submit(task)] = name
             
             # Submit Legend task
             futures_map[executor.submit(task_save_legends)] = "Legends"
@@ -665,7 +843,7 @@ class LayerExporter:
         exports_dir = Path.cwd() / "exports"
         exports_dir.mkdir(exist_ok=True)
         
-        zip_filename = f"STBESA_LAYERS_{self.province}_{timestamp}.zip"
+        zip_filename = f"{out_dirname}.zip"
         zip_path = exports_dir / zip_filename
         
         # List files to zip

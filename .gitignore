@@ -1,3 +1,7 @@
+/.tmp/
+/.gradio/
+/pytest-tmp/
+/pytest-tmp-plot/
 *.ini
 desktop.ini
 **/desktop.ini

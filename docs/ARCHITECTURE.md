@@ -41,8 +41,8 @@ Key methods:
 
 | Class | Responsibility |
 |-------|----------------|
-| `STBESAExporter` | Exports Excel workbooks and plot images. |
-| `LayerExporter` | Exports high-resolution map layers (600 DPI). |
+| `STBESAExporter` | Exports Excel workbooks and 190 mm plot images at 1000 DPI. |
+| `LayerExporter` | Exports high-resolution 190 mm map layers at 600 DPI. |
 
 Export pipeline for layers:
 1. Compute geometry bounds.

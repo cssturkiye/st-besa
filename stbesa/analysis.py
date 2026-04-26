@@ -104,8 +104,8 @@ class STBESAAnalysis:
             import geemap  # ipyleaflet backend
             return geemap.Map(height=height, ee_initialize=False)
         else:
-            import geemap.foliumap as geemap
-            return geemap.Map(height=height, ee_initialize=False)
+            from stbesa.map_renderer import EarthEngineFoliumMap
+            return EarthEngineFoliumMap(self, height=height)
 
     def geopandas_row_to_ee(self, row: gpd.GeoDataFrame):
         import ee
@@ -115,6 +115,11 @@ class STBESAAnalysis:
         feat = ee.Feature(fc.first())
         geom = feat.geometry()
         return feat, geom
+
+    def geopandas_to_ee_feature_collection(self, rows: gpd.GeoDataFrame):
+        import geemap
+        self._ensure_ee()
+        return geemap.geopandas_to_ee(rows, geodesic=False)
 
     def dynamic_stretch(self, img, band: str, geom, default_max: float, *, mask_zero: bool = True, p_low: float = 5, p_high: float = 99, max_retries: int = 3) -> Tuple[float, float]:
         import ee, time

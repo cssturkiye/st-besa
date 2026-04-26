@@ -85,8 +85,8 @@ Displays tabular statistics for the selected year.
 | Button | Output | Format |
 |--------|--------|--------|
 | Excel | Multi-sheet workbook with Overall, L1, L2 statistics and a data dictionary. | `.xlsx` |
-| Plots | Time-series charts (L1 and L2). | `.zip` containing `.png` files |
-| Layers | High-resolution map layers (600 DPI, 174 mm width). | `.zip` containing `.png` files |
+| Plots | Time-series charts (L1 and L2, 190 mm width at 1000 DPI). | `.zip` containing `.png` files |
+| Layers | High-resolution map layers (190 mm width at 600 DPI). | `.zip` containing `.png` files |
 
 Exported files are saved to the `exports/` directory. This runtime directory is created when exports are generated and stores the artifacts produced by the current run. It is separate from the curated archived example outputs stored under `case-studies/` in the repository. A notification displays the full path upon completion.
 

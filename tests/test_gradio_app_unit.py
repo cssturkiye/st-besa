@@ -15,6 +15,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 class _FakeRows:
+    def copy(self):
+        return self
+
     def dissolve(self):
         return "fake-geom-gdf"
 
@@ -25,6 +28,9 @@ class _FakeAnalysisService:
 
     def geopandas_row_to_ee(self, _geom_gdf):
         return "fake-feature", "fake-ee-geom"
+
+    def geopandas_to_ee_feature_collection(self, _rows):
+        return "fake-boundary-fc"
 
     def compute_indicators(self, _geom, year):
         return {
@@ -114,6 +120,8 @@ def test_run_analysis_builds_state_for_a_typical_all_district_run(monkeypatch):
     assert results_state["meta"]["Province"] == "Izmir"
     assert results_state["meta"]["Districts"] == "ALL"
     assert results_state["vis_params"] == {"vol": (1, 2), "sur": (3, 4), "pop": (5, 6)}
+    assert results_state["boundary_fc"] == "fake-boundary-fc"
+    assert isinstance(results_state["boundary_gdf"], _FakeRows)
     assert results_state["overall"]["yil"].tolist() == [2020]
     assert results_state["l1"]["smod_l1_code"].tolist() == [1]
     assert results_state["l2"]["smod_l2_code"].tolist() == [30]

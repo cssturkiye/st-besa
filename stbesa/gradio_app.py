@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Tuple, Optional
 from stbesa.service import STBESAService
 from stbesa.analysis import STBESAAnalysis
-from stbesa.exporter import STBESAExporter
+from stbesa.exporter import PLOT_EXPORT_DPI, PLOT_EXPORT_WIDTH_MM, STBESAExporter
 
 # SMOD Classification Metadata (from backup)
 SMOD_L1_CLASSES = {
@@ -37,6 +37,19 @@ SMOD_L2_CLASSES = {
     11: {"name": "Very low density rural", "l1": 1},
     10: {"name": "Water or no data", "l1": 1},
 }
+
+PLOT_EXPORT_ASPECT_RATIO = 0.78
+PLOT_EXPORT_FIGSIZE = (
+    PLOT_EXPORT_WIDTH_MM / 25.4,
+    (PLOT_EXPORT_WIDTH_MM / 25.4) * PLOT_EXPORT_ASPECT_RATIO,
+)
+PLOT_LEGEND_SCALE = 1.5
+PLOT_LEGEND_FONT_SIZE = 5 * PLOT_LEGEND_SCALE
+PLOT_LEGEND_HANDLE_LENGTH = 2 * PLOT_LEGEND_SCALE
+PLOT_L2_LEGEND_HANDLE_LENGTH = 0.75
+PLOT_LEGEND_COLUMN_SPACING = 1.0 * PLOT_LEGEND_SCALE
+PLOT_L2_LEGEND_COLUMN_SPACING = 0.8
+PLOT_LEGEND_HANDLE_TEXT_PAD = 0.45
 
 L2_COLOR_MAP = {
     10: '#7AB6F5', 11: '#CDF57A', 12: '#ABCD66', 13: '#375623',
@@ -117,12 +130,12 @@ def _render_plots_l1(df_overall: pd.DataFrame, df_l1: pd.DataFrame, current_year
            for metric in ["buvol_m3", "buvol_sur_m2", "pop_person", "bvpc_m3_per_person", "bspc_m2_per_person", "vol_sur_ratio"]}
     
     mpl.rcParams.update({
-        'figure.dpi': 300, 'savefig.dpi': 300, 'axes.titlesize': 7, 'axes.labelsize': 6,
+        'figure.dpi': 300, 'savefig.dpi': PLOT_EXPORT_DPI, 'axes.titlesize': 7, 'axes.labelsize': 6,
         'xtick.labelsize': 5, 'ytick.labelsize': 5, 'legend.fontsize': 5,
         'axes.grid': True, 'grid.linestyle': ':', 'grid.alpha': 0.5
     })
     
-    fig, axes = plt.subplots(3, 2, figsize=(6.85, 5.33), constrained_layout=False)
+    fig, axes = plt.subplots(3, 2, figsize=PLOT_EXPORT_FIGSIZE, constrained_layout=False)
     axes = axes.ravel()
     fig.patch.set_alpha(0.0)
     
@@ -156,11 +169,9 @@ def _render_plots_l1(df_overall: pd.DataFrame, df_l1: pd.DataFrame, current_year
         except Exception:
             pass
     
-    fig.suptitle("L1 Classes + Total", fontsize=7, fontweight='semibold')
-    
     # ADJUSTMENT FOR SCREEN: Increase bottom margin and move legend INSIDE canvas (y > 0)
     # Original export used y=-0.03 which is clipped on screen.
-    fig.subplots_adjust(bottom=0.18, hspace=0.50)
+    fig.subplots_adjust(left=0.08, right=0.98, top=0.94, bottom=0.14, wspace=0.24, hspace=0.42)
     
     handles = [Line2D([0], [0], color=total_color, lw=3, label='Total')]
     labels = ['Total']
@@ -169,8 +180,10 @@ def _render_plots_l1(df_overall: pd.DataFrame, df_l1: pd.DataFrame, current_year
         labels.append({1: 'Rural', 2: 'Urban Cluster', 3: 'Urban Centre'}[cls])
     
     # Legend at y=0.02 ensures it is within the figure bounds
-    fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.02), ncol=4, 
-               prop={'size': 5}, handlelength=2, columnspacing=1.0, frameon=True, 
+    fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.015), ncol=4, 
+               prop={'size': PLOT_LEGEND_FONT_SIZE}, handlelength=PLOT_LEGEND_HANDLE_LENGTH,
+               handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
+               columnspacing=PLOT_LEGEND_COLUMN_SPACING, frameon=True, 
                fancybox=True, shadow=True, edgecolor='black', facecolor='white', framealpha=0.9)
     
     return fig
@@ -191,12 +204,12 @@ def _render_plots_l2(df_overall: pd.DataFrame, df_l2: pd.DataFrame, current_year
            for metric in ["buvol_m3", "buvol_sur_m2", "pop_person", "bvpc_m3_per_person", "bspc_m2_per_person", "vol_sur_ratio"]}
     
     mpl.rcParams.update({
-        'figure.dpi': 300, 'savefig.dpi': 300, 'axes.titlesize': 7, 'axes.labelsize': 6,
+        'figure.dpi': 300, 'savefig.dpi': PLOT_EXPORT_DPI, 'axes.titlesize': 7, 'axes.labelsize': 6,
         'xtick.labelsize': 5, 'ytick.labelsize': 5, 'legend.fontsize': 5,
         'axes.grid': True, 'grid.linestyle': ':', 'grid.alpha': 0.5
     })
     
-    fig, axes = plt.subplots(3, 2, figsize=(6.85, 5.33), constrained_layout=False)
+    fig, axes = plt.subplots(3, 2, figsize=PLOT_EXPORT_FIGSIZE, constrained_layout=False)
     axes = axes.ravel()
     fig.patch.set_alpha(0.0)
     
@@ -231,10 +244,8 @@ def _render_plots_l2(df_overall: pd.DataFrame, df_l2: pd.DataFrame, current_year
         except Exception:
             pass
     
-    fig.suptitle("L2 Classes + Total", fontsize=7, fontweight='semibold')
-    
     # ADJUSTMENT FOR SCREEN: Increase bottom margin and move legend INSIDE canvas
-    fig.subplots_adjust(bottom=0.18, hspace=0.50)
+    fig.subplots_adjust(left=0.08, right=0.98, top=0.94, bottom=0.18, wspace=0.24, hspace=0.42)
     
     handles = [Line2D([0], [0], color=total_color, lw=3, label='Total')]
     labels = ['Total']
@@ -248,14 +259,17 @@ def _render_plots_l2(df_overall: pd.DataFrame, df_l2: pd.DataFrame, current_year
         handles.append(Line2D([0], [0], color=l2_color_map[cls], lw=3))
         labels.append(l2_label_map[cls])
     
-    fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.02), ncol=4, 
-               prop={'size': 5}, handlelength=2, columnspacing=1.0, frameon=True, 
+    fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, 0.015), ncol=3,
+               prop={'size': PLOT_LEGEND_FONT_SIZE},
+               handlelength=PLOT_L2_LEGEND_HANDLE_LENGTH,
+               handletextpad=PLOT_LEGEND_HANDLE_TEXT_PAD,
+               columnspacing=PLOT_L2_LEGEND_COLUMN_SPACING, frameon=True, 
                fancybox=True, shadow=True, edgecolor='black', facecolor='white', framealpha=0.9)
     
     return fig
 
 
-def _generate_map_html(analysis_svc, ee_geom, year: int, vis_params: dict) -> str:
+def _generate_map_html(analysis_svc, ee_geom, year: int, vis_params: dict, boundary_fc=None) -> str:
     """Generate interactive map with data layers and legends."""
     import ee
     
@@ -301,8 +315,10 @@ def _generate_map_html(analysis_svc, ee_geom, year: int, vis_params: dict) -> st
                   {"min": vmin_vol, "max": vmax_vol, "palette": TURBO_PALETTE}, 
                   f"Building Volume {year}", shown=False)
         
-        # Boundary
-        outline = ee.Image().byte().paint(ee.FeatureCollection([ee.Feature(ee_geom)]), 1, 2)
+        # Boundary. Use the original district features when available so internal
+        # district boundaries remain visible; fall back to the dissolved analysis geometry.
+        boundary_source = boundary_fc if boundary_fc is not None else ee.FeatureCollection([ee.Feature(ee_geom)])
+        outline = ee.Image().byte().paint(boundary_source, 1, 2)
         m.addLayer(outline.visualize(min=0, max=1, palette=['000000']), {}, "Boundary")
         
         m.centerObject(ee_geom, 9)
@@ -418,7 +434,13 @@ def refresh_visualization(state, year, vol_min, vol_max, sur_min, sur_max, pop_m
     
     # Render Map
     try:
-        map_html = _generate_map_html(analysis_service, state["geom"], year, new_vis_params)
+        map_html = _generate_map_html(
+            analysis_service,
+            state["geom"],
+            year,
+            new_vis_params,
+            state.get("boundary_fc"),
+        )
     except Exception as e:
         map_html = f"<div style='padding:20px;color:red;'>Map update failed: {str(e)}</div>"
         
@@ -462,16 +484,17 @@ def run_analysis(project_id, dataset_code, province, districts, year: int, max_w
     
         # Get Geometry
         if not districts or "ALL" in districts:
-            row = service.get_rows_by_province(province)
-            geom_gdf = row.dissolve()
+            boundary_gdf = service.get_rows_by_province(province).copy()
+            geom_gdf = boundary_gdf.dissolve()
             analysis_title = f"{province} (All)"
         else:
             s = service.active_gdf
-            rows = s[(s["NAME_1"] == province) & (s["NAME_2"].isin(districts))]
-            geom_gdf = rows.dissolve()
+            boundary_gdf = s[(s["NAME_1"] == province) & (s["NAME_2"].isin(districts))].copy()
+            geom_gdf = boundary_gdf.dissolve()
             analysis_title = f"{province} - {', '.join(districts)}"
             
         ee_feat, ee_geom = analysis_service.geopandas_row_to_ee(geom_gdf)
+        boundary_fc = analysis_service.geopandas_to_ee_feature_collection(boundary_gdf)
         
     except Exception as e:
         # On error, hide modal and raise
@@ -622,7 +645,7 @@ def run_analysis(project_id, dataset_code, province, districts, year: int, max_w
     # Generate Map
     yield (get_modal_html("Finalizing...", "Rendering map layers..."), *[gr.update()] * 18)
     try:
-        map_html = _generate_map_html(analysis_service, ee_geom, year, vis_params)
+        map_html = _generate_map_html(analysis_service, ee_geom, year, vis_params, boundary_fc)
     except Exception as e:
         map_html = f"<div style='padding:20px;color:red;'>Map generation failed: {str(e)}</div>"
     
@@ -651,6 +674,8 @@ def run_analysis(project_id, dataset_code, province, districts, year: int, max_w
         "l1": df_l1,
         "l2": df_l2,
         "geom": ee_geom,
+        "boundary_fc": boundary_fc,
+        "boundary_gdf": boundary_gdf,
         "vis_params": vis_params,
         "meta": meta
     }
@@ -688,7 +713,13 @@ def update_display(state, year):
     
     # Render Map (Fast EE call just for tiles)
     try:
-        map_html = _generate_map_html(analysis_service, ee_geom, year, vis_params)
+        map_html = _generate_map_html(
+            analysis_service,
+            ee_geom,
+            year,
+            vis_params,
+            state.get("boundary_fc"),
+        )
     except Exception as e:
         map_html = f"<div style='padding:20px;color:red;'>Map update failed: {str(e)}</div>"
         
@@ -756,14 +787,14 @@ def export_plots(state):
     filename_l1 = f"ST-BESA_{province}_L1_plots_{timestamp}.png"
     path_l1 = os.path.join(exports_dir, filename_l1)
     if fig_l1:
-        fig_l1.savefig(path_l1, format='png', dpi=300, bbox_inches='tight', facecolor='white')
+        STBESAExporter.export_plots_as_png(fig_l1, path_l1)
         plt.close(fig_l1)
     
     # Save L2 plot
     filename_l2 = f"ST-BESA_{province}_L2_plots_{timestamp}.png"
     path_l2 = os.path.join(exports_dir, filename_l2)
     if fig_l2:
-        fig_l2.savefig(path_l2, format='png', dpi=300, bbox_inches='tight', facecolor='white')
+        STBESAExporter.export_plots_as_png(fig_l2, path_l2)
         plt.close(fig_l2)
     
     # Create ZIP with both plots
@@ -783,8 +814,8 @@ def export_plots(state):
     return zip_path
 
 
-def save_layers(state, year, progress=gr.Progress()):
-    """Export high-resolution publication-quality layers (174mm @ 600 DPI)."""
+def save_layers(state, year, include_osm_text=False, progress=gr.Progress()):
+    """Export high-resolution publication-quality layers (190mm @ 600 DPI)."""
     if not state:
         raise gr.Error("No analysis results to export. Run analysis first.")
     
@@ -809,7 +840,9 @@ def save_layers(state, year, progress=gr.Progress()):
         ee_geom=state["geom"],
         year=int(year),
         province=province,
-        vis_params=vis_params
+        vis_params=vis_params,
+        include_osm_text=bool(include_osm_text),
+        boundary_gdf=state.get("boundary_gdf"),
     )
     
     progress(0, desc="Exporting layers in parallel (2-5 min)...")
@@ -886,6 +919,33 @@ css = """
 #map-container, #map-container > div, #data-container, #data-container > div {
     width: 100%;
     min-height: 100px;
+}
+
+#export-main-actions {
+    gap: 20px;
+}
+
+#layers-export-row {
+    align-items: center !important;
+    gap: 12px;
+    flex-wrap: nowrap !important;
+}
+
+#layers-export-row > * {
+    margin: 0 !important;
+}
+
+#include-osm-text-overlay {
+    display: flex !important;
+    width: 250px !important;
+    min-width: 250px !important;
+    flex: 0 0 250px !important;
+    align-items: center;
+}
+
+#include-osm-text-overlay label,
+#include-osm-text-overlay span {
+    white-space: nowrap;
 }
 """
 
@@ -987,10 +1047,19 @@ with gr.Blocks(title="ST-BESA Platform", css=css) as app:
             run_btn = gr.Button("🚀 Run Full Analysis (All Years)", variant="primary", size="lg")
             
             gr.Markdown("### 📤 Export")
-            with gr.Row():
+            with gr.Row(elem_id="export-main-actions"):
                 export_btn = gr.Button("📥 Excel", size="sm")
                 export_plots_btn = gr.Button("📊 Plots", size="sm")
-                save_layers_btn = gr.Button("🖼️ Layers", size="sm")
+            with gr.Row(elem_id="layers-export-row"):
+                save_layers_btn = gr.Button("🖼️ Layers", size="sm", scale=0, min_width=200)
+                include_osm_text_chk = gr.Checkbox(
+                    label="Include OSM text overlay",
+                    value=False,
+                    container=False,
+                    scale=0,
+                    min_width=250,
+                    elem_id="include-osm-text-overlay",
+                )
             
             export_out = gr.File(label="Download", height=60)
             
@@ -1139,7 +1208,7 @@ with gr.Blocks(title="ST-BESA Platform", css=css) as app:
     
     save_layers_btn.click(
         save_layers,
-        inputs=[analysis_results, year_slider],
+        inputs=[analysis_results, year_slider, include_osm_text_chk],
         outputs=[export_out]
     )
 
